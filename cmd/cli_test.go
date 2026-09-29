@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,17 +12,23 @@ import (
 // run executes the root command with args and returns its combined output.
 func run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+	return runContext(t, context.Background(), args...)
+}
+
+// runContext is run with a context, for commands that serve until it is canceled.
+func runContext(t *testing.T, ctx context.Context, args ...string) (string, error) {
+	t.Helper()
 	skillContent = []byte("---\nname: agentboard\ndescription: Test skill\n---\n")
 	var out bytes.Buffer
 	cmd := newRootCmd("1.2.3")
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs(args)
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(ctx)
 	return out.String(), err
 }
 
-// runContext is run with a context, for commands that serve until it is canceled.
+// mustRun fails the test when the command returns an error.
 func mustRun(t *testing.T, args ...string) string {
 	t.Helper()
 	out, err := run(t, args...)
@@ -186,9 +193,18 @@ func TestRmAndBadIDs(t *testing.T) {
 	if out := mustRun(t, "--repo", dir, "ls"); out != "" {
 		t.Errorf("ls after rm = %q", out)
 	}
-	for _, args := range [][]string{{"rm", "1"}, {"rm", "abc"}, {"mv", "0", "done"}, {"edit", "-3", "x"}} {
-		if _, err := run(t, append([]string{"--repo", dir}, args...)...); err == nil {
-			t.Errorf("%v returned no error", args)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"rm", "1"}, "not found"},
+		{[]string{"rm", "abc"}, "invalid task id"},
+		{[]string{"mv", "0", "done"}, "invalid task id"},
+		{[]string{"edit", "0", "# x"}, "invalid task id"},
+		{[]string{"show", "0"}, "invalid task id"},
+	} {
+		if _, err := run(t, append([]string{"--repo", dir}, tc.args...)...); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%v error = %v, want %q", tc.args, err, tc.want)
 		}
 	}
 }
@@ -204,9 +220,12 @@ func TestMvIsRepoScoped(t *testing.T) {
 
 func TestBoardRejectsNonLoopbackAddr(t *testing.T) {
 	setup(t)
-	for _, addr := range []string{"0.0.0.0:7420", ":7420", "192.168.1.10:7420", "example.com:80", "nonsense"} {
-		if _, err := run(t, "board", "--addr", addr); err == nil {
-			t.Errorf("board --addr %s started", addr)
+	// A canceled context makes a wrongly accepted address return at once instead of serving forever.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, addr := range []string{"0.0.0.0:0", ":0", "192.168.1.10:0", "example.com:0", "nonsense"} {
+		if _, err := runContext(t, ctx, "board", "--addr", addr); err == nil || !strings.Contains(err.Error(), "--addr") {
+			t.Errorf("board --addr %s error = %v, want an --addr error", addr, err)
 		}
 	}
 	for _, addr := range []string{"127.0.0.1:0", "localhost:0", "[::1]:0"} {
