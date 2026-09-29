@@ -20,6 +20,7 @@ type options struct {
 }
 
 var rootCmd = newRootCmd("dev")
+var skillContent []byte
 
 func newRootCmd(version string) *cobra.Command {
 	opts := options{}
@@ -41,7 +42,8 @@ func newRootCmd(version string) *cobra.Command {
 }
 
 // Execute runs the CLI with the given build version and returns the process exit code.
-func Execute(version string) int {
+func Execute(version string, skill []byte) int {
+	skillContent = skill
 	rootCmd.Version = version
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

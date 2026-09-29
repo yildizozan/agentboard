@@ -11,6 +11,7 @@ import (
 // run executes the root command with args and returns its combined output.
 func run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+	skillContent = []byte("---\nname: agentboard\ndescription: Test skill\n---\n")
 	var out bytes.Buffer
 	cmd := newRootCmd("1.2.3")
 	cmd.SetOut(&out)

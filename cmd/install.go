@@ -16,7 +16,7 @@ func newInstallCmd() *cobra.Command {
 	var scope string
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Register the MCP server with Codex and Claude Code",
+		Short: "Register the MCP server and skill with Codex and Claude Code",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if scope != "user" && scope != "project" {
@@ -45,6 +45,9 @@ func installUser(cmd *cobra.Command, binary string) error {
 		if _, err := exec.LookPath(name); err != nil {
 			return fmt.Errorf("%s CLI is required for user scope: %w", name, err)
 		}
+	}
+	if err := installSkills(cmd, "user", ""); err != nil {
+		return err
 	}
 	for _, entry := range []struct {
 		name string
@@ -94,6 +97,9 @@ func installProject(cmd *cobra.Command, binary string) error {
 		if err := os.WriteFile(claudePath, claudeConfig, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", claudePath, err)
 		}
+	}
+	if err := installSkills(cmd, "project", dir); err != nil {
+		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Registered agentboard with Codex and Claude Code (project: %s)\n", dir)
 	return nil

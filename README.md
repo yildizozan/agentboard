@@ -79,22 +79,16 @@ directory (`cwd`), and the board is chosen from it per call.
 
 ### Agent skill
 
-This repository includes an [agentboard skill](.agents/skills/agentboard/SKILL.md)
-for Codex and Claude Code. It guides agents through listing, claiming, updating,
-and completing tasks using the MCP tools. The project skill loads when working
-in this repository; user-scoped MCP registration alone does not load it in
-other repositories. To use it across projects, copy it to both clients' personal
-skill directories:
-
-```bash
-mkdir -p "$HOME/.agents/skills/agentboard" "$HOME/.claude/skills/agentboard"
-cp .agents/skills/agentboard/SKILL.md "$HOME/.agents/skills/agentboard/SKILL.md"
-cp .agents/skills/agentboard/SKILL.md "$HOME/.claude/skills/agentboard/SKILL.md"
-```
-
-Run these commands from the agentboard source directory. After updates to the
-skill, copy it again to refresh the personal copies. You can invoke it as
-`$agentboard` in Codex or `/agentboard` in Claude Code.
+The [agentboard skill](skill/agentboard/SKILL.md) is bundled in the
+binary. `agentboard install` registers the MCP server and installs the skill
+to `~/.agents/skills/agentboard/` for Codex and `~/.claude/skills/agentboard/`
+for Claude Code on Linux, macOS, and Windows. With `--scope project`, both the
+MCP configuration and skills go into the current directory instead. Run install
+again after upgrading the binary to update the installed skill. If an existing
+user-scoped MCP entry makes a client reject duplicate registration, the skill is
+still updated; inspect that client's existing `agentboard` entry before changing
+it. You can invoke the skill as `$agentboard` in Codex or `/agentboard` in
+Claude Code.
 
 ### Tools
 

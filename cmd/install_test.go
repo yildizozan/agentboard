@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/spf13/cobra"
 )
 
 func TestInstallUserRegistersBothClients(t *testing.T) {
@@ -25,6 +26,8 @@ func TestInstallUserRegistersBothClients(t *testing.T) {
 	}
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("REGISTRATION_LOG", logDir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	output := mustRun(t, "install")
 	if !strings.Contains(output, "codex (user)") || !strings.Contains(output, "claude (user)") {
 		t.Errorf("install output = %q", output)
@@ -49,6 +52,26 @@ func TestInstallUserRegistersBothClients(t *testing.T) {
 			t.Errorf("%s args = %q, want %q", name, got, want)
 		}
 	}
+	assertInstalledSkills(t, home)
+}
+
+func TestInstallUserUpdatesSkillsWhenRegistrationFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses POSIX shell shims")
+	}
+	shimDir := t.TempDir()
+	for _, name := range []string{"codex", "claude"} {
+		if err := os.WriteFile(filepath.Join(shimDir, name), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := run(t, "install"); err == nil || !strings.Contains(err.Error(), "register with codex") {
+		t.Errorf("registration error = %v", err)
+	}
+	assertInstalledSkills(t, home)
 }
 
 func TestInstallProjectPreservesConfigAndIsIdempotent(t *testing.T) {
@@ -67,6 +90,7 @@ func TestInstallProjectPreservesConfigAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustRun(t, "--repo", other, "install", "--scope", "project")
+	assertInstalledSkills(t, dir)
 	if _, err := os.Stat(filepath.Join(other, ".mcp.json")); !os.IsNotExist(err) {
 		t.Errorf("--repo directory was changed: %v", err)
 	}
@@ -123,6 +147,20 @@ func TestInstallProjectPreservesConfigAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func assertInstalledSkills(t *testing.T, dir string) {
+	t.Helper()
+	for _, client := range []string{".agents", ".claude"} {
+		path := filepath.Join(dir, client, "skills", "agentboard", "SKILL.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if string(data) != string(skillContent) {
+			t.Errorf("skill at %s differs from bundled content", path)
+		}
+	}
+}
+
 func TestInstallProjectRejectsConflictBeforeWriting(t *testing.T) {
 	dir := setup(t)
 	t.Chdir(dir)
@@ -141,5 +179,84 @@ func TestInstallProjectRejectsConflictBeforeWriting(t *testing.T) {
 	}
 	if _, err := run(t, "install", "--scope", "invalid"); err == nil || !strings.Contains(err.Error(), "invalid scope") {
 		t.Errorf("invalid scope error = %v", err)
+	}
+}
+
+func TestInstallSkillsUserScope(t *testing.T) {
+	home := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	} else {
+		t.Setenv("HOME", home)
+	}
+	skillContent = []byte("first version")
+	if err := installSkills(&cobra.Command{}, "user", ""); err != nil {
+		t.Fatal(err)
+	}
+	assertInstalledSkills(t, home)
+	skillContent = []byte("updated version")
+	if err := installSkills(&cobra.Command{}, "user", ""); err != nil {
+		t.Fatal(err)
+	}
+	assertInstalledSkills(t, home)
+}
+
+func TestInstallSkillsPreservesMatchingSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges on Windows")
+	}
+	dir := t.TempDir()
+	skillContent = []byte("shared skill")
+	codexDir := filepath.Join(dir, ".agents", "skills", "agentboard")
+	claudeDir := filepath.Join(dir, ".claude", "skills")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "SKILL.md"), skillContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(claudeDir, "agentboard")
+	if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "agentboard"), link); err != nil {
+		t.Fatal(err)
+	}
+	if err := installSkills(&cobra.Command{}, "project", dir); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("project symlink was replaced: %v", err)
+	}
+	skillContent = []byte("different skill")
+	if err := installSkills(&cobra.Command{}, "project", dir); err != nil {
+		t.Fatal(err)
+	}
+	assertInstalledSkills(t, dir)
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("update replaced the project symlink: %v", err)
+	}
+}
+
+func TestWriteSkillRejectsDifferentSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges on Windows")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "custom-skill.md")
+	if err := os.WriteFile(target, []byte("personal skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "SKILL.md")
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+	skillContent = []byte("bundled skill")
+	if err := writeSkill(path); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("different symlink target should be preserved: %v", err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || string(data) != "personal skill" {
+		t.Errorf("symlink target changed: %v", err)
 	}
 }
