@@ -34,18 +34,18 @@ Her görev için ortak bitiş koşulu: `gofmt -l .` boş çıktı verir, `go vet
 **Açıklama:** SQLite store'u yazar. `Open(path)` dizini `0700` ile oluşturur, DSN pragmalarını uygular (`journal_mode(WAL)`, `busy_timeout(5000)`, `_txlock=immediate`) ve `PRAGMA user_version` ile embed edilmiş şemayı uygular. `Add` ve `List` her zaman `repo` ile çalışır. `List` durum filtresi alır ve sonuçları durum sırasına, sonra `id`'ye göre döner.
 
 **Kabul kriterleri:**
-- [ ] Aynı dosyayı iki kez açmak migration'ı tekrar uygulamaz; `user_version` 1'dir.
-- [ ] Bir repoya eklenen görev başka bir reponun `List` sonucunda görünmez.
-- [ ] Aynı DB dosyası üzerinde iki ayrı `Store` örneği, her biri 50 goroutine ile eşzamanlı `Add` yaptığında 100 kaydın tamamı hatasız yazılır.
+- [x] Aynı dosyayı iki kez açmak migration'ı tekrar uygulamaz; `user_version` 1'dir.
+- [x] Bir repoya eklenen görev başka bir reponun `List` sonucunda görünmez.
+- [x] Aynı DB dosyası üzerinde iki ayrı `Store` örneği, her biri 50 goroutine ile eşzamanlı `Add` yaptığında 100 kaydın tamamı hatasız yazılır.
 
 **Doğrulama:**
-- [ ] `go test -race ./internal/store/...`
+- [x] `go test -race ./internal/store/...`
 
 **Bağımlılıklar:** Görev 1
 
 **Dokunulacak dosyalar:**
 - `internal/store/store.go`
-- `internal/store/schema.sql`
+- `internal/store/schema_v1.sql`
 - `internal/store/store_test.go`
 
 **Kapsam:** M

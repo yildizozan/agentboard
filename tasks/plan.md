@@ -13,7 +13,9 @@ Tek binary, CGO yok. Aynı cobra uygulaması `serve` (MCP stdio), `board` (yerel
 - **SQLite, tek dosya:** `~/.agentboard/agentboard.db`. `AGENTBOARD_HOME` env değişkeni dizini değiştirir (testler ve özel kurulumlar için).
 - **Neden SQLite:** Her agent oturumu kendi MCP process'ini başlatır; aynı DB'ye birden çok process aynı anda yazar. SQLite WAL modu ve `busy_timeout` bunu güvenli şekilde çözer. Markdown, JSON ve görev başına dosya seçenekleri değerlendirildi ve elendi (gerekçe sohbet geçmişinde; özet: lock ve parser yükü, ya da ID üretimi ve frontmatter maliyeti).
 - **Driver:** `modernc.org/sqlite` (saf Go, CGO yok, cross-compile kolay). `mattn/go-sqlite3` CGO gerektirdiği için seçilmedi.
-- **DSN pragmaları:** `_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_txlock=immediate`. `immediate` yazma transaction'larının başta kilit almasını sağlar; okuma-kontrol-yazma adımlarında deadlock ve `SQLITE_BUSY` yükseltme hatası olmaz.
+- **DSN pragmaları:** `_pragma=busy_timeout(5000)&_txlock=immediate`. `immediate` yazma transaction'larının başta kilit almasını sağlar; okuma-kontrol-yazma adımlarında deadlock ve `SQLITE_BUSY` yükseltme hatası olmaz.
+- **WAL DSN'de değil:** `journal_mode` değişikliği `busy_timeout`'u dikkate almıyor; başka bir bağlantı kilit tutarken hemen `SQLITE_BUSY` dönüyor (Görev 2'de ölçüldü). WAL dosyada kalıcı olduğu için `Open` içinde bir kez, `SQLITE_BUSY` hatasında 5 saniyeye kadar yeniden denenerek açılır.
+- **Process başına tek bağlantı:** `db.SetMaxOpenConns(1)`. Process içindeki yazmalar `database/sql` havuzunda sıraya girer; SQLite kilidi için sadece process'ler yarışır. Aksi halde 100 eşzamanlı yazmada ara sıra `SQLITE_BUSY` görüldü.
 - **Migration:** `PRAGMA user_version` ve `embed` edilmiş SQL dosyaları. Migration kütüphanesi kullanılmaz.
 
 ### Veri modeli
