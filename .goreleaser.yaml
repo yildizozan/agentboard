@@ -8,9 +8,12 @@ before:
     - npm --prefix web ci
     - npm --prefix web run build
 
+# Binaries are written straight to dist/ as agentboard_<os>_<arch> (".exe" is appended
+# on Windows) and uploaded to the GitHub release under that name.
 builds:
   - main: .
-    binary: agentboard
+    binary: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    no_unique_dist_dir: true
     env:
       - CGO_ENABLED=0
     targets:
@@ -21,10 +24,9 @@ builds:
     ldflags:
       - -s -w -X main.version={{ .Version }}
 
-# Raw binaries are uploaded as agentboard_<os>_<arch>; GoReleaser appends .exe on Windows.
 archives:
   - formats: [binary]
-    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .Binary }}"
 
 checksum:
   name_template: checksums.txt
