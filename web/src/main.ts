@@ -1,5 +1,6 @@
 import './style.css'
 import { api, ApiError, type Board, type Repo, type Status, type Task } from './api'
+import { renderMarkdown } from './markdown'
 
 const POLL_MS = 2000
 const TOAST_MS = 4000
@@ -9,7 +10,8 @@ const state = {
   repo: new URLSearchParams(location.search).get('repo') ?? '',
   board: null as Board | null,
   dragging: null as { id: number; from: Status } | null,
-  editingId: null as number | null,
+  openId: null as number | null, // task shown in the detail dialog
+  editing: false, // the detail dialog shows the body editor
 }
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -23,8 +25,8 @@ const ui = {
   columns: byId<HTMLDivElement>('columns'),
   empty: byId<HTMLParagraphElement>('empty'),
   addForm: byId<HTMLFormElement>('add-form'),
-  newTitle: byId<HTMLInputElement>('new-title'),
-  newDesc: byId<HTMLInputElement>('new-desc'),
+  newBody: byId<HTMLTextAreaElement>('new-body'),
+  detail: byId<HTMLDialogElement>('detail'),
   toast: byId<HTMLDivElement>('toast'),
 }
 
@@ -61,11 +63,21 @@ function errorMessage(err: unknown): string {
   return 'Cannot reach agentboard. Is `agentboard board` still running?'
 }
 
+function markdown(body: string): HTMLElement {
+  const node = el('div', 'markdown')
+  node.innerHTML = renderMarkdown(body)
+  return node
+}
+
+let boardKey = ''
 async function refresh() {
   try {
     state.repos = await api.repos()
     if (!state.repo && state.repos.length > 0) setRepo(state.repos[0].path)
     state.board = state.repo ? await api.board(state.repo) : null
+    const key = JSON.stringify([state.repo, state.repos, state.board])
+    if (key === boardKey) return // unchanged poll: keep the DOM, so selections and scroll survive
+    boardKey = key
     render()
   } catch (err) {
     toast(errorMessage(err))
@@ -74,7 +86,7 @@ async function refresh() {
 
 function setRepo(path: string) {
   state.repo = path
-  state.editingId = null
+  closeDetail()
   const url = new URL(location.href)
   url.searchParams.set('repo', path)
   history.replaceState(null, '', url)
@@ -87,11 +99,13 @@ function render() {
     ui.columns.replaceChildren()
     ui.empty.hidden = false
     ui.empty.textContent = 'No boards yet. A board appears when an agent or the CLI adds its first task.'
+    renderDetail()
     return
   }
   ui.empty.hidden = true
   const { statuses, tasks } = state.board
   ui.columns.replaceChildren(...statuses.map((s) => column(s, tasks.filter((t) => t.status === s))))
+  renderDetail()
 }
 
 let selectKey = ''
@@ -137,8 +151,8 @@ function column(status: Status, tasks: Task[]): HTMLElement {
   return col
 }
 
+// card shows only the title; the full Markdown body opens in the detail dialog.
 function card(t: Task): HTMLElement {
-  if (t.id === state.editingId) return editCard(t)
   const node = el('article', 'card')
   node.draggable = true
   node.dataset.id = String(t.id)
@@ -152,46 +166,68 @@ function card(t: Task): HTMLElement {
     node.classList.remove('dragging')
   })
 
-  const title = button(t.title, 'card-title', () => startEdit(t.id), `Edit #${t.id}: ${t.title}`)
+  const title = button(t.title, 'card-title', () => openDetail(t.id), `Open #${t.id}: ${t.title}`)
   const del = button('×', 'card-delete', () => void removeTask(t), `Delete #${t.id}`)
   node.append(el('div', 'card-head', el('span', 'card-id', `#${t.id}`), del), title)
-  const firstLine = t.description.split('\n')[0]
-  if (firstLine) node.append(el('p', 'card-desc', firstLine))
   return node
 }
 
-function editCard(t: Task): HTMLElement {
-  const title = el('input', 'edit-title')
-  title.value = t.title
-  title.setAttribute('aria-label', 'Title')
-  const desc = el('textarea', 'edit-desc')
-  desc.value = t.description
-  desc.rows = 3
-  desc.setAttribute('aria-label', 'Description')
-
-  const save = el('button', 'primary', 'Save')
-  save.type = 'submit'
-  const form = el('form', 'card editing', el('span', 'card-id', `#${t.id}`), title, desc,
-    el('div', 'edit-actions', save, button('Cancel', '', stopEdit)))
-  form.addEventListener('submit', (e) => {
-    e.preventDefault()
-    void saveTask(t.id, title.value, desc.value)
-  })
-  form.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') stopEdit()
-  })
-  queueMicrotask(() => title.focus())
-  return form
+function renderDetail() {
+  if (state.openId === null) return
+  const t = state.board?.tasks.find((x) => x.id === state.openId)
+  if (!t) {
+    closeDetail()
+    toast('The task was deleted.')
+    return
+  }
+  if (state.editing) return // keep the editor and its unsaved text
+  const meta = el('span', 'card-id', `#${t.id} · ${t.status}`)
+  meta.id = 'detail-meta'
+  const head = el('div', 'detail-head', meta,
+    el('div', 'edit-actions', button('Edit', '', () => startEdit(t)), button('Close', '', closeDetail)))
+  ui.detail.replaceChildren(head, markdown(t.body))
+  if (!ui.detail.open) ui.detail.showModal()
 }
 
-function startEdit(id: number) {
-  state.editingId = id
-  render()
+function startEdit(t: Task) {
+  state.editing = true
+  const body = el('textarea', 'edit-body')
+  body.value = t.body
+  body.rows = 16
+  body.setAttribute('aria-label', 'Body (Markdown, first line is the # title)')
+  const save = el('button', 'primary', 'Save')
+  save.type = 'submit'
+  const form = el('form', 'detail-edit',
+    el('div', 'detail-head', el('span', 'card-id', `#${t.id} · editing`),
+      el('div', 'edit-actions', save, button('Cancel', '', stopEdit))),
+    body)
+  form.addEventListener('submit', (e) => {
+    e.preventDefault()
+    void saveTask(t.id, body.value)
+  })
+  body.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) form.requestSubmit()
+  })
+  ui.detail.replaceChildren(form)
+  body.setSelectionRange(0, 0) // start at the title, not scrolled to the end
+  body.focus()
 }
 
 function stopEdit() {
-  state.editingId = null
-  render()
+  state.editing = false
+  renderDetail()
+}
+
+function openDetail(id: number) {
+  state.openId = id
+  state.editing = false
+  renderDetail()
+}
+
+function closeDetail() {
+  state.openId = null
+  state.editing = false
+  if (ui.detail.open) ui.detail.close()
 }
 
 async function moveTask(id: number, from: Status, to: Status) {
@@ -207,14 +243,16 @@ async function moveTask(id: number, from: Status, to: Status) {
   await refresh()
 }
 
-async function saveTask(id: number, title: string, description: string) {
+async function saveTask(id: number, body: string) {
   try {
-    await api.patch(state.repo, id, { title, description })
-    state.editingId = null
-    await refresh()
+    await api.patch(state.repo, id, { body })
   } catch (err) {
     toast(errorMessage(err)) // stay in edit mode so the input is not lost
+    return
   }
+  state.editing = false
+  boardKey = '' // re-render the dialog even if the saved body matches the last poll
+  await refresh()
 }
 
 async function removeTask(t: Task) {
@@ -235,18 +273,36 @@ ui.select.addEventListener('change', () => {
 ui.addForm.addEventListener('submit', async (e) => {
   e.preventDefault()
   try {
-    await api.create(state.repo, ui.newTitle.value, ui.newDesc.value)
+    await api.create(state.repo, ui.newBody.value)
     ui.addForm.reset()
-    ui.newTitle.focus()
+    ui.newBody.focus()
   } catch (err) {
     toast(errorMessage(err))
   }
   await refresh()
 })
 
+ui.newBody.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) ui.addForm.requestSubmit()
+})
+
+// Esc closes the dialog, but first leaves the editor so unsaved text is not dropped by accident.
+ui.detail.addEventListener('cancel', (e) => {
+  if (!state.editing) return
+  e.preventDefault()
+  stopEdit()
+})
+ui.detail.addEventListener('close', () => {
+  state.openId = null
+  state.editing = false
+})
+ui.detail.addEventListener('click', (e) => {
+  if (e.target === ui.detail && !state.editing) closeDetail() // backdrop click
+})
+
 // Poll so tasks written by agents appear; pause while dragging, editing or hidden.
 setInterval(() => {
-  if (!document.hidden && !state.dragging && state.editingId === null) void refresh()
+  if (!document.hidden && !state.dragging && !state.editing) void refresh()
 }, POLL_MS)
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void refresh()

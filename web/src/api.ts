@@ -5,8 +5,8 @@ export type Status = string
 export interface Task {
   id: number
   repo: string
-  title: string
-  description: string
+  title: string // derived by the server from the body's "# " first line
+  body: string // Markdown
   status: Status
   createdAt: string
   updatedAt: string
@@ -25,8 +25,7 @@ export interface Board {
 }
 
 export interface Patch {
-  title?: string
-  description?: string
+  body?: string
   status?: Status
   from?: Status
 }
@@ -65,8 +64,7 @@ const repoQuery = (repo: string) => `?repo=${encodeURIComponent(repo)}`
 export const api = {
   repos: () => request<Repo[]>('GET', '/api/repos'),
   board: (repo: string) => request<Board>('GET', `/api/tasks${repoQuery(repo)}`),
-  create: (repo: string, title: string, description: string) =>
-    request<Task>('POST', `/api/tasks${repoQuery(repo)}`, { title, description }),
+  create: (repo: string, body: string) => request<Task>('POST', `/api/tasks${repoQuery(repo)}`, { body }),
   patch: (repo: string, id: number, patch: Patch) =>
     request<Task>('PATCH', `/api/tasks/${id}${repoQuery(repo)}`, patch),
   remove: (repo: string, id: number) => request<void>('DELETE', `/api/tasks/${id}${repoQuery(repo)}`),

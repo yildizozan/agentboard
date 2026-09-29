@@ -117,9 +117,12 @@ button:disabled {
   min-width: 280px;
 }
 
-.add-form input {
+.add-form textarea {
   flex: 1;
-  min-width: 140px;
+  min-width: 200px;
+  max-height: 40vh;
+  resize: vertical;
+  field-sizing: content;
 }
 
 main {
@@ -224,25 +227,107 @@ main {
   color: var(--danger);
 }
 
-.card-desc {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.detail {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 25%);
 }
 
-.card.editing {
+.detail::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+.detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-edit {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  cursor: default;
-  border-color: var(--accent);
+  gap: 10px;
 }
 
-.edit-desc {
+.edit-body {
+  width: 100%;
   resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.markdown {
+  overflow-wrap: anywhere;
+}
+
+.markdown h1 {
+  margin: 12px 0 8px;
+  font-size: 22px;
+}
+
+.markdown h2 {
+  margin: 18px 0 6px;
+  font-size: 17px;
+}
+
+.markdown h3 {
+  margin: 14px 0 4px;
+  font-size: 15px;
+}
+
+.markdown a {
+  color: var(--accent);
+}
+
+.markdown code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--column);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.markdown pre {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--column);
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: none;
+}
+
+.markdown blockquote {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+
+.markdown table {
+  border-collapse: collapse;
+}
+
+.markdown th,
+.markdown td {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+}
+
+.markdown li:has(> input[type='checkbox']) {
+  list-style: none;
+}
+
+.markdown li > input[type='checkbox'] {
+  margin: 0 6px 0 -20px;
 }
 
 .edit-actions {

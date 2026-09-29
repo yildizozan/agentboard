@@ -14,8 +14,8 @@
         <select id="repo" aria-label="Board"></select>
       </label>
       <form id="add-form" class="add-form" autocomplete="off">
-        <input id="new-title" name="title" placeholder="New task title" aria-label="New task title" required />
-        <input id="new-desc" name="description" placeholder="Description (optional)" aria-label="Description" />
+        <textarea id="new-body" name="body" rows="1" required aria-label="New task (Markdown)"
+          placeholder="# New task title&#10;&#10;Markdown details (optional)"></textarea>
         <button type="submit">Add to backlog</button>
       </form>
     </header>
@@ -23,6 +23,7 @@
       <p id="empty" class="empty" hidden></p>
       <div id="columns" class="columns"></div>
     </main>
+    <dialog id="detail" class="detail" aria-labelledby="detail-meta"></dialog>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
