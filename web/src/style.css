@@ -109,20 +109,8 @@ button:disabled {
   min-width: 200px;
 }
 
-.add-form {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 280px;
-}
-
-.add-form textarea {
-  flex: 1;
-  min-width: 200px;
-  max-height: 40vh;
-  resize: vertical;
-  field-sizing: content;
+.add-task {
+  margin-left: auto;
 }
 
 main {
@@ -249,17 +237,60 @@ main {
   gap: 8px;
 }
 
-.detail-edit {
+/* The editor covers the viewport except for a 30px margin on every side. */
+.editor {
+  position: fixed;
+  inset: 30px;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 25%);
+}
+
+.editor::backdrop {
+  background: rgb(0 0 0 / 50%);
+}
+
+.editor-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  height: 100%;
 }
 
-.edit-body {
+.editor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.editor-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.editor-body {
+  flex: 1;
   width: 100%;
-  resize: vertical;
+  resize: none;
+  padding: 12px 14px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.editor-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .markdown {

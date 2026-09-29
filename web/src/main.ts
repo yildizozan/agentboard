@@ -1,5 +1,6 @@
 import './style.css'
 import { api, ApiError, type Board, type Repo, type Status, type Task } from './api'
+import { openEditor } from './editor'
 import { renderMarkdown } from './markdown'
 
 const POLL_MS = 2000
@@ -11,7 +12,7 @@ const state = {
   board: null as Board | null,
   dragging: null as { id: number; from: Status } | null,
   openId: null as number | null, // task shown in the detail dialog
-  editing: false, // the detail dialog shows the body editor
+  editing: false, // the editor dialog is open; polling pauses so it is not disturbed
 }
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -24,9 +25,9 @@ const ui = {
   select: byId<HTMLSelectElement>('repo'),
   columns: byId<HTMLDivElement>('columns'),
   empty: byId<HTMLParagraphElement>('empty'),
-  addForm: byId<HTMLFormElement>('add-form'),
-  newBody: byId<HTMLTextAreaElement>('new-body'),
+  addButton: byId<HTMLButtonElement>('add-task'),
   detail: byId<HTMLDialogElement>('detail'),
+  editor: byId<HTMLDialogElement>('editor'),
   toast: byId<HTMLDivElement>('toast'),
 }
 
@@ -94,7 +95,7 @@ function setRepo(path: string) {
 
 function render() {
   renderSelect()
-  ui.addForm.querySelector('button')!.disabled = !state.repo
+  ui.addButton.disabled = !state.repo
   if (!state.board) {
     ui.columns.replaceChildren()
     ui.empty.hidden = false
@@ -180,53 +181,53 @@ function renderDetail() {
     toast('The task was deleted.')
     return
   }
-  if (state.editing) return // keep the editor and its unsaved text
   const meta = el('span', 'card-id', `#${t.id} · ${t.status}`)
   meta.id = 'detail-meta'
   const head = el('div', 'detail-head', meta,
-    el('div', 'edit-actions', button('Edit', '', () => startEdit(t)), button('Close', '', closeDetail)))
+    el('div', 'edit-actions', button('Edit', '', () => editTask(t)), button('Close', '', closeDetail)))
   ui.detail.replaceChildren(head, markdown(t.body))
   if (!ui.detail.open) ui.detail.showModal()
 }
 
-function startEdit(t: Task) {
+// edit opens the full-screen Markdown editor; write stores its body and returns once it is saved.
+function edit(heading: string, body: string, submitLabel: string, write: (body: string) => Promise<unknown>) {
   state.editing = true
-  const body = el('textarea', 'edit-body')
-  body.value = t.body
-  body.rows = 16
-  body.setAttribute('aria-label', 'Body (Markdown, first line is the # title)')
-  const save = el('button', 'primary', 'Save')
-  save.type = 'submit'
-  const form = el('form', 'detail-edit',
-    el('div', 'detail-head', el('span', 'card-id', `#${t.id} · editing`),
-      el('div', 'edit-actions', save, button('Cancel', '', stopEdit))),
-    body)
-  form.addEventListener('submit', (e) => {
-    e.preventDefault()
-    void saveTask(t.id, body.value)
+  openEditor(ui.editor, {
+    heading,
+    body,
+    submitLabel,
+    save: async (text) => {
+      try {
+        await write(text)
+      } catch (err) {
+        toast(errorMessage(err)) // the editor stays open, so the text is not lost
+        return false
+      }
+      boardKey = '' // re-render the detail dialog even if the saved body matches the last poll
+      await refresh()
+      return true
+    },
+    onClose: () => {
+      state.editing = false
+    },
   })
-  body.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) form.requestSubmit()
-  })
-  ui.detail.replaceChildren(form)
-  body.setSelectionRange(0, 0) // start at the title, not scrolled to the end
-  body.focus()
 }
 
-function stopEdit() {
-  state.editing = false
-  renderDetail()
+function addTask() {
+  edit('New task', '', 'Add to backlog', (body) => api.create(state.repo, body))
+}
+
+function editTask(t: Task) {
+  edit(`Edit #${t.id}`, t.body, 'Save', (body) => api.patch(state.repo, t.id, { body }))
 }
 
 function openDetail(id: number) {
   state.openId = id
-  state.editing = false
   renderDetail()
 }
 
 function closeDetail() {
   state.openId = null
-  state.editing = false
   if (ui.detail.open) ui.detail.close()
 }
 
@@ -240,18 +241,6 @@ async function moveTask(id: number, from: Status, to: Status) {
       toast(errorMessage(err))
     }
   }
-  await refresh()
-}
-
-async function saveTask(id: number, body: string) {
-  try {
-    await api.patch(state.repo, id, { body })
-  } catch (err) {
-    toast(errorMessage(err)) // stay in edit mode so the input is not lost
-    return
-  }
-  state.editing = false
-  boardKey = '' // re-render the dialog even if the saved body matches the last poll
   await refresh()
 }
 
@@ -270,34 +259,13 @@ ui.select.addEventListener('change', () => {
   void refresh()
 })
 
-ui.addForm.addEventListener('submit', async (e) => {
-  e.preventDefault()
-  try {
-    await api.create(state.repo, ui.newBody.value)
-    ui.addForm.reset()
-    ui.newBody.focus()
-  } catch (err) {
-    toast(errorMessage(err))
-  }
-  await refresh()
-})
+ui.addButton.addEventListener('click', addTask)
 
-ui.newBody.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) ui.addForm.requestSubmit()
-})
-
-// Esc closes the dialog, but first leaves the editor so unsaved text is not dropped by accident.
-ui.detail.addEventListener('cancel', (e) => {
-  if (!state.editing) return
-  e.preventDefault()
-  stopEdit()
-})
 ui.detail.addEventListener('close', () => {
   state.openId = null
-  state.editing = false
 })
 ui.detail.addEventListener('click', (e) => {
-  if (e.target === ui.detail && !state.editing) closeDetail() // backdrop click
+  if (e.target === ui.detail) closeDetail() // backdrop click
 })
 
 // Poll so tasks written by agents appear; pause while dragging, editing or hidden.
