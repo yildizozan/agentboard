@@ -182,6 +182,44 @@ func TestInstallProjectRejectsConflictBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestInstallProjectRefusesUnusableConfigWithoutWriting(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, content, want string
+	}{
+		{"broken JSON", ".mcp.json", "{", "invalid JSON"},
+		{"mcpServers not an object", ".mcp.json", `{"mcpServers": []}`, "invalid mcpServers"},
+		{"other Claude entry", ".mcp.json", `{"mcpServers": {"agentboard": {"command": "another", "args": ["serve"]}}}`, "already configured differently"},
+		{"broken TOML", ".codex/config.toml", "[[", "invalid TOML"},
+		{"mcp_servers not a table", ".codex/config.toml", "mcp_servers = 1\n", "invalid mcp_servers"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := setup(t)
+			t.Chdir(dir)
+			path := filepath.Join(dir, tc.file)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := run(t, "install", "--scope", "project"); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("install error = %v, want %q", err, tc.want)
+			}
+			if data, _ := os.ReadFile(path); string(data) != tc.content {
+				t.Errorf("%s changed to %q", tc.file, data)
+			}
+			for _, other := range []string{".mcp.json", ".codex/config.toml", ".claude/skills"} {
+				if other == tc.file {
+					continue
+				}
+				if _, err := os.Stat(filepath.Join(dir, other)); !os.IsNotExist(err) {
+					t.Errorf("%s written although install failed: %v", other, err)
+				}
+			}
+		})
+	}
+}
+
 func TestInstallSkillsUserScope(t *testing.T) {
 	home := t.TempDir()
 	if runtime.GOOS == "windows" {
