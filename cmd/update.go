@@ -38,25 +38,41 @@ func newMvCmd(opts *options) *cobra.Command {
 }
 
 func newEditCmd(opts *options) *cobra.Command {
-	var title, description string
-	cmd := &cobra.Command{
-		Use:   "edit <id>",
-		Short: "Change a task's title or description",
-		Args:  cobra.ExactArgs(1),
+	return &cobra.Command{
+		Use:   "edit <id> <body>",
+		Short: "Replace a task's body",
+		Long:  bodyHelp("Replace a task's body."),
+		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var p task.Patch
-			if cmd.Flags().Changed("title") {
-				p.Title = &title
+			body, err := readBody(cmd, args[1])
+			if err != nil {
+				return err
 			}
-			if cmd.Flags().Changed("description") {
-				p.Description = &description
-			}
-			return opts.updateTask(cmd, args[0], p)
+			return opts.updateTask(cmd, args[0], task.Patch{Body: &body})
 		},
 	}
-	cmd.Flags().StringVarP(&title, "title", "t", "", "new title")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "new description (empty clears it)")
-	return cmd
+}
+
+func newShowCmd(opts *options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "show <id>",
+		Short: "Print a task's status line and Markdown body",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseID(args[0])
+			if err != nil {
+				return err
+			}
+			return opts.withBoard(func(s *store.Store, repoKey string) error {
+				tk, err := s.Get(cmd.Context(), repoKey, id)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), tk.Detail())
+				return nil
+			})
+		},
+	}
 }
 
 func newRmCmd(opts *options) *cobra.Command {

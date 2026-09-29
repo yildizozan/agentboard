@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -22,11 +23,11 @@ func openTemp(t *testing.T) (*Store, string) {
 	return s, path
 }
 
-func mustAdd(t *testing.T, s *Store, repo, title string, status task.Status) task.Task {
+func mustAdd(t *testing.T, s *Store, repo, body string, status task.Status) task.Task {
 	t.Helper()
-	tk, err := s.Add(context.Background(), repo, title, "", status)
+	tk, err := s.Add(context.Background(), repo, body, status)
 	if err != nil {
-		t.Fatalf("Add(%q): %v", title, err)
+		t.Fatalf("Add(%q): %v", body, err)
 	}
 	return tk
 }
@@ -59,6 +60,38 @@ func TestOpenMigratesOnce(t *testing.T) {
 	}
 }
 
+func TestMigrationV2MovesTitleAndDescriptionIntoBody(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agentboard.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(schemaV1 + `
+		INSERT INTO tasks (repo, title, description, status, created_at, updated_at) VALUES
+			('/r', 'Fix login', 'token expiry', 'todo', 1, 2),
+			('/r', 'No details', '', 'done', 3, 4);
+		PRAGMA user_version = 1;`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	got, err := s.List(context.Background(), "/r", nil)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("List = %v, %v; want 2 tasks", got, err)
+	}
+	if got[0].Body != "# Fix login\n\ntoken expiry" || got[0].Title() != "Fix login" || got[0].UpdatedAt.Unix() != 2 {
+		t.Errorf("migrated task = %+v", got[0])
+	}
+	if got[1].Body != "# No details" {
+		t.Errorf("migrated task without description = %+v", got[1])
+	}
+}
+
 func TestOpenUsesWAL(t *testing.T) {
 	s, _ := openTemp(t)
 	var mode string
@@ -72,11 +105,11 @@ func TestOpenUsesWAL(t *testing.T) {
 
 func TestAddReturnsStoredTask(t *testing.T) {
 	s, _ := openTemp(t)
-	tk, err := s.Add(context.Background(), "/r", "  Fix login  ", "details", task.Todo)
+	tk, err := s.Add(context.Background(), "/r", "  Fix login  \n\ndetails\n", task.Todo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tk.ID == 0 || tk.Repo != "/r" || tk.Title != "Fix login" || tk.Description != "details" || tk.Status != task.Todo {
+	if tk.ID == 0 || tk.Repo != "/r" || tk.Body != "# Fix login\n\ndetails" || tk.Status != task.Todo {
 		t.Errorf("Add returned %+v", tk)
 	}
 	if tk.CreatedAt.IsZero() || !tk.UpdatedAt.Equal(tk.CreatedAt) {
@@ -87,13 +120,13 @@ func TestAddReturnsStoredTask(t *testing.T) {
 func TestAddRejectsInvalidInput(t *testing.T) {
 	s, _ := openTemp(t)
 	ctx := context.Background()
-	if _, err := s.Add(ctx, "/r", "  ", "", task.Todo); !errors.Is(err, task.ErrEmptyTitle) {
-		t.Errorf("blank title error = %v, want ErrEmptyTitle", err)
+	if _, err := s.Add(ctx, "/r", "  ", task.Todo); !errors.Is(err, task.ErrNoTitle) {
+		t.Errorf("blank body error = %v, want ErrNoTitle", err)
 	}
-	if _, err := s.Add(ctx, "/r", "x", "", task.Status("later")); err == nil {
+	if _, err := s.Add(ctx, "/r", "x", task.Status("later")); err == nil {
 		t.Error("invalid status accepted")
 	}
-	if _, err := s.Add(ctx, "", "x", "", task.Todo); err == nil {
+	if _, err := s.Add(ctx, "", "x", task.Todo); err == nil {
 		t.Error("empty repo accepted")
 	}
 }
@@ -107,7 +140,7 @@ func TestListIsolatesRepos(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Title != "in a" {
+	if len(got) != 1 || got[0].Title() != "in a" {
 		t.Errorf("List(/a) = %v", got)
 	}
 }
@@ -182,7 +215,7 @@ func TestConcurrentWritersAcrossStores(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if _, err := s.Add(context.Background(), "/r", fmt.Sprintf("s%d-w%d", i, j), "", task.Todo); err != nil {
+				if _, err := s.Add(context.Background(), "/r", fmt.Sprintf("s%d-w%d", i, j), task.Todo); err != nil {
 					errs <- err
 				}
 			}()
@@ -257,18 +290,18 @@ func TestUpdateConflictLeavesTaskUnchanged(t *testing.T) {
 
 func TestUpdateChangesOnlyGivenFields(t *testing.T) {
 	s, _ := openTemp(t)
-	tk, err := s.Add(context.Background(), "/r", "old", "keep this", task.Todo)
+	tk := mustAdd(t, s, "/r", "# old", task.Todo)
+	got, err := s.Update(context.Background(), "/r", tk.ID, task.Patch{Body: ptr("  # new\n\n- [ ] step  ")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.Update(context.Background(), "/r", tk.ID, task.Patch{Title: ptr("  new  ")})
+	stored, err := s.Get(context.Background(), "/r", tk.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stored := get(t, s, "/r", tk.ID)
 	for _, x := range []task.Task{got, stored} {
-		if x.Title != "new" || x.Description != "keep this" || x.Status != task.Todo {
-			t.Errorf("unexpected task after title patch: %+v", x)
+		if x.Body != "# new\n\n- [ ] step" || x.Status != task.Todo {
+			t.Errorf("unexpected task after body patch: %+v", x)
 		}
 	}
 }
@@ -276,7 +309,7 @@ func TestUpdateChangesOnlyGivenFields(t *testing.T) {
 func TestUpdateValidatesPatch(t *testing.T) {
 	s, _ := openTemp(t)
 	tk := mustAdd(t, s, "/r", "x", task.Todo)
-	for _, p := range []task.Patch{{}, {From: ptr(task.Todo)}, {Title: ptr(" ")}} {
+	for _, p := range []task.Patch{{}, {From: ptr(task.Todo)}, {Body: ptr(" ")}} {
 		if _, err := s.Update(context.Background(), "/r", tk.ID, p); err == nil {
 			t.Errorf("Update(%+v) returned no error", p)
 		}
@@ -290,6 +323,9 @@ func TestUpdateAndDeleteAreRepoScoped(t *testing.T) {
 
 	if _, err := s.Update(ctx, "/b", tk.ID, task.Patch{Status: ptr(task.Done)}); !errors.Is(err, task.ErrNotFound) {
 		t.Errorf("cross-repo Update error = %v, want ErrNotFound", err)
+	}
+	if _, err := s.Get(ctx, "/b", tk.ID); !errors.Is(err, task.ErrNotFound) {
+		t.Errorf("cross-repo Get error = %v, want ErrNotFound", err)
 	}
 	if err := s.Delete(ctx, "/b", tk.ID); !errors.Is(err, task.ErrNotFound) {
 		t.Errorf("cross-repo Delete error = %v, want ErrNotFound", err)

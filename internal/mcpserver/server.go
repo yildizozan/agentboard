@@ -17,6 +17,10 @@ import (
 const statusGuide = "Statuses: backlog = idea or later work, not planned yet; todo = planned, next up; " +
 	"doing = actively being worked on; done = finished."
 
+// bodyGuide tells agents how to write a card; task.ValidateBody enforces the heading rule.
+const bodyGuide = `Markdown body; the first line must be the "# <title>" heading (a plain first line becomes it), ` +
+	`e.g. "# Fix login bug\n\n## Context\n...\n\n## Steps\n- [ ] ..."`
+
 // cwdInput is embedded in every tool input: the board is chosen per call from the agent's cwd.
 type cwdInput struct {
 	Cwd string `json:"cwd" jsonschema:"absolute path of your current working directory; selects the repository's board"`
@@ -24,9 +28,8 @@ type cwdInput struct {
 
 type addInput struct {
 	cwdInput
-	Title       string `json:"title" jsonschema:"short task title"`
-	Description string `json:"description,omitempty" jsonschema:"optional details"`
-	Status      string `json:"status,omitempty" jsonschema:"initial status: backlog (default), todo, doing or done"`
+	Body   string `json:"body" jsonschema:"card content"`
+	Status string `json:"status,omitempty" jsonschema:"initial status: backlog (default), todo, doing or done"`
 }
 
 type listInput struct {
@@ -43,12 +46,12 @@ type moveInput struct {
 
 type updateInput struct {
 	cwdInput
-	ID          int64   `json:"id" jsonschema:"task id"`
-	Title       *string `json:"title,omitempty" jsonschema:"new title"`
-	Description *string `json:"description,omitempty" jsonschema:"new description; an empty string clears it"`
+	ID   int64  `json:"id" jsonschema:"task id"`
+	Body string `json:"body" jsonschema:"new card content; replaces the whole body"`
 }
 
-type deleteInput struct {
+// idInput selects one task; task_get and task_delete share it.
+type idInput struct {
 	cwdInput
 	ID int64 `json:"id" jsonschema:"task id"`
 }
@@ -59,13 +62,19 @@ func New(s *store.Store, version string) *mcp.Server {
 	h := handlers{store: s}
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "task_add",
-		Description: "Add a task to the board of the repository at cwd. Record work you plan to do or discover. " + statusGuide,
+		Name: "task_add",
+		Description: "Add a task to the board of the repository at cwd. Record work you plan to do or discover. " +
+			"body: " + bodyGuide + ". " + statusGuide,
 	}, h.add)
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "task_list",
-		Description: "List tasks on the board of the repository at cwd, ordered by status then id. Check it before starting work. " + statusGuide,
+		Name: "task_list",
+		Description: "List tasks on the board of the repository at cwd, ordered by status then id, one title line each. " +
+			"Check it before starting work; read a card's body with task_get. " + statusGuide,
 	}, h.list)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "task_get",
+		Description: "Show one task of the board at cwd: its status line followed by its full Markdown body.",
+	}, h.get)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "task_move",
 		Description: "Move a task to another status. When claiming a task pass from with the status you expect " +
@@ -73,8 +82,9 @@ func New(s *store.Store, version string) *mcp.Server {
 			"Move tasks to done when finished. " + statusGuide,
 	}, h.move)
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "task_update",
-		Description: "Change a task's title or description, for example to record findings or narrow the scope. Status changes use task_move.",
+		Name: "task_update",
+		Description: "Replace a task's body, for example to record findings, blockers or a narrowed scope. " +
+			"Read it with task_get first and send the whole new body. body: " + bodyGuide + ". Status changes use task_move.",
 	}, h.update)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "task_delete",
@@ -98,7 +108,7 @@ func (h handlers) add(ctx context.Context, _ *mcp.CallToolRequest, in addInput) 
 			return nil, nil, err
 		}
 	}
-	tk, err := h.store.Add(ctx, repoKey, in.Title, in.Description, status)
+	tk, err := h.store.Add(ctx, repoKey, in.Body, status)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -149,7 +159,19 @@ func (h handlers) move(ctx context.Context, _ *mcp.CallToolRequest, in moveInput
 }
 
 func (h handlers) update(ctx context.Context, _ *mcp.CallToolRequest, in updateInput) (*mcp.CallToolResult, any, error) {
-	return h.patch(ctx, in.Cwd, in.ID, task.Patch{Title: in.Title, Description: in.Description})
+	return h.patch(ctx, in.Cwd, in.ID, task.Patch{Body: &in.Body})
+}
+
+func (h handlers) get(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, any, error) {
+	repoKey, err := resolve(in.Cwd)
+	if err != nil {
+		return nil, nil, err
+	}
+	tk, err := h.store.Get(ctx, repoKey, in.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return text(tk.Detail()), nil, nil
 }
 
 // patch applies p to a task of the board at cwd; move and update share it.
@@ -165,7 +187,7 @@ func (h handlers) patch(ctx context.Context, cwd string, id int64, p task.Patch)
 	return text(tk.String()), nil, nil
 }
 
-func (h handlers) delete(ctx context.Context, _ *mcp.CallToolRequest, in deleteInput) (*mcp.CallToolResult, any, error) {
+func (h handlers) delete(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, any, error) {
 	repoKey, err := resolve(in.Cwd)
 	if err != nil {
 		return nil, nil, err

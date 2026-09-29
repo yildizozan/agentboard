@@ -99,7 +99,7 @@ func TestListToolsExposesCwdAndSchemas(t *testing.T) {
 			t.Errorf("%s has no description", tool.Name)
 		}
 	}
-	for _, want := range []string{"task_add", "task_list", "task_move", "task_update", "task_delete"} {
+	for _, want := range []string{"task_add", "task_list", "task_get", "task_move", "task_update", "task_delete"} {
 		if !slices.Contains(names, want) {
 			t.Errorf("tool %s missing from %v", want, names)
 		}
@@ -109,11 +109,11 @@ func TestListToolsExposesCwdAndSchemas(t *testing.T) {
 func TestAddAndList(t *testing.T) {
 	cs := connect(t)
 	dir := workDir(t)
-	if out := mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "title": "Fix login"}); out != "#1 [backlog] Fix login" {
+	if out := mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "Fix login"}); out != "#1 [backlog] Fix login" {
 		t.Errorf("task_add = %q", out)
 	}
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "title": "Ship it", "status": "done"})
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "title": "Now", "status": "doing", "description": "details"})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "Ship it", "status": "done"})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Now\n\n## Context\ndetails", "status": "doing"})
 
 	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir}); out != "#1 [backlog] Fix login\n#3 [doing] Now" {
 		t.Errorf("task_list = %q", out)
@@ -121,12 +121,15 @@ func TestAddAndList(t *testing.T) {
 	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir, "status": "done"}); out != "#2 [done] Ship it" {
 		t.Errorf("task_list done = %q", out)
 	}
+	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 3}); out != "#3 [doing] Now\n\n# Now\n\n## Context\ndetails" {
+		t.Errorf("task_get = %q", out)
+	}
 }
 
 func TestListEmptyAndRepoIsolation(t *testing.T) {
 	cs := connect(t)
 	a, b := workDir(t), workDir(t)
-	mustCall(t, cs, "task_add", map[string]any{"cwd": a, "title": "only in a"})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": a, "body": "only in a"})
 	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": b}); out != "no tasks" {
 		t.Errorf("task_list in other repo = %q", out)
 	}
@@ -136,11 +139,12 @@ func TestInvalidInputIsToolError(t *testing.T) {
 	cs := connect(t)
 	dir := workDir(t)
 	cases := map[string]map[string]any{
-		"bad status":    {"cwd": dir, "title": "x", "status": "later"},
-		"blank title":   {"cwd": dir, "title": "  "},
-		"relative cwd":  {"cwd": "relative/dir", "title": "x"},
-		"missing cwd":   {"cwd": filepath.Join(dir, "nope"), "title": "x"},
-		"no cwd at all": {"title": "x"},
+		"bad status":    {"cwd": dir, "body": "x", "status": "later"},
+		"blank body":    {"cwd": dir, "body": "  "},
+		"deep heading":  {"cwd": dir, "body": "## Context"},
+		"relative cwd":  {"cwd": "relative/dir", "body": "x"},
+		"missing cwd":   {"cwd": filepath.Join(dir, "nope"), "body": "x"},
+		"no cwd at all": {"body": "x"},
 	}
 	for name, args := range cases {
 		if out, isErr := call(t, cs, "task_add", args); !isErr {
@@ -152,7 +156,7 @@ func TestInvalidInputIsToolError(t *testing.T) {
 func TestMoveWithFromConflict(t *testing.T) {
 	cs := connect(t)
 	dir := workDir(t)
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "title": "claim me", "status": "todo"})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "claim me", "status": "todo"})
 	if out := mustCall(t, cs, "task_move", map[string]any{"cwd": dir, "id": 1, "status": "doing", "from": "todo"}); out != "#1 [doing] claim me" {
 		t.Errorf("task_move = %q", out)
 	}
@@ -165,8 +169,8 @@ func TestMoveWithFromConflict(t *testing.T) {
 func TestUpdateAndDelete(t *testing.T) {
 	cs := connect(t)
 	dir := workDir(t)
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "title": "old", "status": "todo"})
-	if out := mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 1, "title": "new"}); out != "#1 [todo] new" {
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "old", "status": "todo"})
+	if out := mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 1, "body": "# new\n\n- [x] done"}); out != "#1 [todo] new" {
 		t.Errorf("task_update = %q", out)
 	}
 	if out, isErr := call(t, cs, "task_update", map[string]any{"cwd": dir, "id": 1}); !isErr {
@@ -186,12 +190,13 @@ func TestUpdateAndDelete(t *testing.T) {
 func TestOneServerServesSeveralReposWithoutLeaks(t *testing.T) {
 	cs := connect(t)
 	a, b := workDir(t), workDir(t)
-	mustCall(t, cs, "task_add", map[string]any{"cwd": a, "title": "in a"})
-	mustCall(t, cs, "task_add", map[string]any{"cwd": b, "title": "in b"})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": a, "body": "in a"})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": b, "body": "in b"})
 
 	for name, args := range map[string]map[string]any{
 		"task_move":   {"cwd": b, "id": 1, "status": "done"},
-		"task_update": {"cwd": b, "id": 1, "title": "hijacked"},
+		"task_get":    {"cwd": b, "id": 1},
+		"task_update": {"cwd": b, "id": 1, "body": "hijacked"},
 		"task_delete": {"cwd": b, "id": 1},
 	} {
 		if out, isErr := call(t, cs, name, args); !isErr || !strings.Contains(out, "not found") {

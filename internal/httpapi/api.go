@@ -39,9 +39,8 @@ type tasksJSON struct {
 }
 
 type createJSON struct {
-	Title       string      `json:"title"`
-	Description string      `json:"description"`
-	Status      task.Status `json:"status"`
+	Body   string      `json:"body"`
+	Status task.Status `json:"status"`
 }
 
 type errorJSON struct {
@@ -156,7 +155,7 @@ func (a api) createTask(w http.ResponseWriter, r *http.Request) {
 	if in.Status == "" {
 		in.Status = task.Backlog
 	}
-	tk, err := a.store.Add(r.Context(), repo, in.Title, in.Description, in.Status)
+	tk, err := a.store.Add(r.Context(), repo, in.Body, in.Status)
 	if err != nil {
 		writeError(w, err)
 		return

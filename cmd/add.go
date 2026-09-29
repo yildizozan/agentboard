@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 
@@ -10,18 +11,23 @@ import (
 )
 
 func newAddCmd(opts *options) *cobra.Command {
-	var description, status string
+	var status string
 	cmd := &cobra.Command{
-		Use:   "add <title>",
+		Use:   "add <body>",
 		Short: "Add a task to the repository's board",
+		Long:  bodyHelp("Add a task to the repository's board."),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, err := task.ParseStatus(status)
 			if err != nil {
 				return err
 			}
+			body, err := readBody(cmd, args[0])
+			if err != nil {
+				return err
+			}
 			return opts.withBoard(func(s *store.Store, repoKey string) error {
-				tk, err := s.Add(cmd.Context(), repoKey, args[0], description, st)
+				tk, err := s.Add(cmd.Context(), repoKey, body, st)
 				if err != nil {
 					return err
 				}
@@ -30,7 +36,31 @@ func newAddCmd(opts *options) *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().StringVarP(&description, "description", "d", "", "task description")
 	cmd.Flags().StringVarP(&status, "status", "s", string(task.Backlog), "initial status: backlog, todo, doing or done")
 	return cmd
+}
+
+// bodyHelp appends the card body rules shared by add and edit to summary.
+func bodyHelp(summary string) string {
+	return summary + ` The body is Markdown; its first line is the "# <title>" heading
+(a plain first line becomes the heading). Pass - to read the body from stdin:
+
+  agentboard add - <<'EOF'
+  # Fix login bug
+
+  ## Context
+  Token expiry uses < instead of <=.
+  EOF`
+}
+
+// readBody returns arg, or stdin when arg is "-".
+func readBody(cmd *cobra.Command, arg string) (string, error) {
+	if arg != "-" {
+		return arg, nil
+	}
+	data, err := io.ReadAll(cmd.InOrStdin())
+	if err != nil {
+		return "", fmt.Errorf("read body from stdin: %w", err)
+	}
+	return string(data), nil
 }

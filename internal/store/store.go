@@ -32,8 +32,11 @@ const lockWait = 5 * time.Second
 //go:embed schema_v1.sql
 var schemaV1 string
 
+//go:embed schema_v2.sql
+var schemaV2 string
+
 // migrations[i] upgrades the schema from user_version i to i+1.
-var migrations = []string{schemaV1}
+var migrations = []string{schemaV1, schemaV2}
 
 // Store is a handle to the task database.
 type Store struct {
@@ -119,12 +122,12 @@ func (s *Store) migrate(ctx context.Context) error {
 	return tx.Commit()
 }
 
-// Add validates and inserts a new task into repo.
-func (s *Store) Add(ctx context.Context, repo, title, description string, status task.Status) (task.Task, error) {
+// Add validates and inserts a new task with a Markdown body into repo.
+func (s *Store) Add(ctx context.Context, repo, body string, status task.Status) (task.Task, error) {
 	if repo == "" {
 		return task.Task{}, task.Invalidf("repo must not be empty")
 	}
-	title, err := task.ValidateTitle(title)
+	body, err := task.ValidateBody(body)
 	if err != nil {
 		return task.Task{}, err
 	}
@@ -134,8 +137,8 @@ func (s *Store) Add(ctx context.Context, repo, title, description string, status
 
 	now := time.Now().Unix()
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO tasks (repo, title, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		repo, title, description, string(status), now, now)
+		`INSERT INTO tasks (repo, body, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		repo, body, string(status), now, now)
 	if err != nil {
 		return task.Task{}, fmt.Errorf("insert task: %w", err)
 	}
@@ -144,13 +147,12 @@ func (s *Store) Add(ctx context.Context, repo, title, description string, status
 		return task.Task{}, fmt.Errorf("read task id: %w", err)
 	}
 	return task.Task{
-		ID:          id,
-		Repo:        repo,
-		Title:       title,
-		Description: description,
-		Status:      status,
-		CreatedAt:   time.Unix(now, 0),
-		UpdatedAt:   time.Unix(now, 0),
+		ID:        id,
+		Repo:      repo,
+		Body:      body,
+		Status:    status,
+		CreatedAt: time.Unix(now, 0),
+		UpdatedAt: time.Unix(now, 0),
 	}, nil
 }
 
@@ -168,10 +170,7 @@ func (s *Store) Update(ctx context.Context, repo string, id int64, p task.Patch)
 	}
 	defer tx.Rollback()
 
-	tk, err := scanTask(tx.QueryRowContext(ctx, `SELECT `+taskColumns+` FROM tasks WHERE id = ? AND repo = ?`, id, repo))
-	if errors.Is(err, sql.ErrNoRows) {
-		return task.Task{}, fmt.Errorf("#%d: %w", id, task.ErrNotFound)
-	}
+	tk, err := getTask(ctx, tx, repo, id)
 	if err != nil {
 		return task.Task{}, err
 	}
@@ -179,11 +178,8 @@ func (s *Store) Update(ctx context.Context, repo string, id int64, p task.Patch)
 		return task.Task{}, &task.ConflictError{ID: id, Current: tk.Status}
 	}
 
-	if p.Title != nil {
-		tk.Title = *p.Title
-	}
-	if p.Description != nil {
-		tk.Description = *p.Description
+	if p.Body != nil {
+		tk.Body = *p.Body
 	}
 	if p.Status != nil {
 		tk.Status = *p.Status
@@ -191,14 +187,19 @@ func (s *Store) Update(ctx context.Context, repo string, id int64, p task.Patch)
 	now := time.Now().Unix()
 	tk.UpdatedAt = time.Unix(now, 0)
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE tasks SET title = ?, description = ?, status = ?, updated_at = ? WHERE id = ?`,
-		tk.Title, tk.Description, string(tk.Status), now, id); err != nil {
+		`UPDATE tasks SET body = ?, status = ?, updated_at = ? WHERE id = ?`,
+		tk.Body, string(tk.Status), now, id); err != nil {
 		return task.Task{}, fmt.Errorf("update task: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return task.Task{}, fmt.Errorf("commit update: %w", err)
 	}
 	return tk, nil
+}
+
+// Get returns task id of repo or task.ErrNotFound.
+func (s *Store) Get(ctx context.Context, repo string, id int64) (task.Task, error) {
+	return getTask(ctx, s.db, repo, id)
 }
 
 // Delete removes task id from repo or returns task.ErrNotFound.
@@ -283,11 +284,24 @@ func (s *Store) Repos(ctx context.Context) ([]RepoSummary, error) {
 }
 
 // taskColumns is the column list scanTask expects.
-const taskColumns = `id, repo, title, description, status, created_at, updated_at`
+const taskColumns = `id, repo, body, status, created_at, updated_at`
 
 // scanner is satisfied by *sql.Row and *sql.Rows.
 type scanner interface {
 	Scan(dest ...any) error
+}
+
+// rowQuerier is satisfied by *sql.DB and *sql.Tx.
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func getTask(ctx context.Context, q rowQuerier, repo string, id int64) (task.Task, error) {
+	tk, err := scanTask(q.QueryRowContext(ctx, `SELECT `+taskColumns+` FROM tasks WHERE id = ? AND repo = ?`, id, repo))
+	if errors.Is(err, sql.ErrNoRows) {
+		return task.Task{}, fmt.Errorf("#%d: %w", id, task.ErrNotFound)
+	}
+	return tk, err
 }
 
 func scanTask(row scanner) (task.Task, error) {
@@ -296,7 +310,7 @@ func scanTask(row scanner) (task.Task, error) {
 		status           string
 		created, updated int64
 	)
-	if err := row.Scan(&tk.ID, &tk.Repo, &tk.Title, &tk.Description, &status, &created, &updated); err != nil {
+	if err := row.Scan(&tk.ID, &tk.Repo, &tk.Body, &status, &created, &updated); err != nil {
 		return task.Task{}, fmt.Errorf("scan task: %w", err)
 	}
 	tk.Status = task.Status(status)

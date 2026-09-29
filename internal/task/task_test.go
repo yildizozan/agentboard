@@ -1,6 +1,7 @@
 package task
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -48,28 +49,66 @@ func TestStatusesReturnsCopy(t *testing.T) {
 	}
 }
 
-func TestValidateTitle(t *testing.T) {
-	got, err := ValidateTitle("  Fix login bug \n")
-	if err != nil {
-		t.Fatalf("ValidateTitle error: %v", err)
+func TestValidateBody(t *testing.T) {
+	cases := map[string]string{
+		"  # Fix login bug \n\n## Context\n- token\n": "# Fix login bug\n\n## Context\n- token",
+		"Fix login bug":          "# Fix login bug",
+		"#Fix login bug\r\nmore": "# Fix login bug\nmore",
+		"\n\n#   Spaced   ":      "# Spaced",
 	}
-	if got != "Fix login bug" {
-		t.Errorf("ValidateTitle = %q, want trimmed title", got)
+	for in, want := range cases {
+		got, err := ValidateBody(in)
+		if err != nil {
+			t.Fatalf("ValidateBody(%q) error: %v", in, err)
+		}
+		if got != want {
+			t.Errorf("ValidateBody(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
-func TestValidateTitleRejectsBlank(t *testing.T) {
-	for _, s := range []string{"", "   ", "\t\n"} {
-		if _, err := ValidateTitle(s); !errors.Is(err, ErrEmptyTitle) {
-			t.Errorf("ValidateTitle(%q) error = %v, want ErrEmptyTitle", s, err)
+func TestValidateBodyRejects(t *testing.T) {
+	for _, s := range []string{"", "   ", "\t\n", "#", "#  \nbody", "## Context\n- item"} {
+		if _, err := ValidateBody(s); !errors.Is(err, ErrNoTitle) {
+			t.Errorf("ValidateBody(%q) error = %v, want ErrNoTitle", s, err)
+		}
+	}
+}
+
+func TestTitleOf(t *testing.T) {
+	cases := map[string]string{
+		"# Fix login bug\n\n## Context": "Fix login bug",
+		"# #12 keeps inner hash":        "#12 keeps inner hash",
+		"":                              "",
+	}
+	for in, want := range cases {
+		if got := TitleOf(in); got != want {
+			t.Errorf("TitleOf(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
 
 func TestTaskString(t *testing.T) {
-	tk := Task{ID: 12, Status: Doing, Title: "Fix login bug"}
+	tk := Task{ID: 12, Status: Doing, Body: "# Fix login bug\n\n## Context"}
 	if got, want := tk.String(), "#12 [doing] Fix login bug"; got != want {
 		t.Errorf("String() = %q, want %q", got, want)
+	}
+	if got, want := tk.Detail(), "#12 [doing] Fix login bug\n\n# Fix login bug\n\n## Context"; got != want {
+		t.Errorf("Detail() = %q, want %q", got, want)
+	}
+}
+
+func TestTaskJSONIncludesTitle(t *testing.T) {
+	data, err := json.Marshal(Task{ID: 1, Body: "# Title\n\ntext", Status: Todo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["title"] != "Title" || got["body"] != "# Title\n\ntext" || got["status"] != "todo" {
+		t.Errorf("JSON = %s", data)
 	}
 }
 
@@ -87,12 +126,12 @@ func TestConflictError(t *testing.T) {
 func ptr[T any](v T) *T { return &v }
 
 func TestPatchValidate(t *testing.T) {
-	p, err := Patch{Title: ptr("  New title "), Status: ptr(Doing), From: ptr(Todo)}.Validate()
+	p, err := Patch{Body: ptr("  New title "), Status: ptr(Doing), From: ptr(Todo)}.Validate()
 	if err != nil {
 		t.Fatalf("Validate error: %v", err)
 	}
-	if *p.Title != "New title" {
-		t.Errorf("title not trimmed: %q", *p.Title)
+	if *p.Body != "# New title" {
+		t.Errorf("body not normalized: %q", *p.Body)
 	}
 }
 
@@ -100,7 +139,7 @@ func TestPatchValidateRejects(t *testing.T) {
 	cases := map[string]Patch{
 		"empty":          {},
 		"from only":      {From: ptr(Todo)},
-		"blank title":    {Title: ptr("  ")},
+		"blank body":     {Body: ptr("  ")},
 		"invalid status": {Status: ptr(Status("later"))},
 		"invalid from":   {Status: ptr(Doing), From: ptr(Status("later"))},
 	}
@@ -113,7 +152,7 @@ func TestPatchValidateRejects(t *testing.T) {
 
 func TestValidationErrorsMatchErrInvalid(t *testing.T) {
 	_, statusErr := ParseStatus("later")
-	_, titleErr := ValidateTitle(" ")
+	_, titleErr := ValidateBody(" ")
 	_, patchErr := Patch{}.Validate()
 	for _, err := range []error{statusErr, titleErr, patchErr, Invalidf("x")} {
 		if !errors.Is(err, ErrInvalid) {

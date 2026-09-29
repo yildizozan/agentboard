@@ -21,7 +21,7 @@ func run(t *testing.T, args ...string) (string, error) {
 	return out.String(), err
 }
 
-// mustRun fails the test when the command returns an error.
+// runContext is run with a context, for commands that serve until it is canceled.
 func mustRun(t *testing.T, args ...string) string {
 	t.Helper()
 	out, err := run(t, args...)
@@ -64,11 +64,33 @@ func TestAddDefaultsToBacklog(t *testing.T) {
 	}
 }
 
-func TestAddWithStatusAndDescription(t *testing.T) {
+func TestAddMarkdownBodyAndShow(t *testing.T) {
 	dir := setup(t)
-	out := mustRun(t, "--repo", dir, "add", "Write docs", "-d", "README first", "-s", "todo")
+	out := mustRun(t, "--repo", dir, "add", "# Write docs\n\n## Steps\n- [ ] README", "-s", "todo")
 	if out != "#1 [todo] Write docs\n" {
 		t.Errorf("add output = %q", out)
+	}
+	if out := mustRun(t, "--repo", dir, "show", "1"); out != "#1 [todo] Write docs\n\n# Write docs\n\n## Steps\n- [ ] README\n" {
+		t.Errorf("show output = %q", out)
+	}
+	if _, err := run(t, "--repo", dir, "show", "9"); err == nil {
+		t.Error("show of missing task succeeded")
+	}
+}
+
+func TestAddReadsBodyFromStdin(t *testing.T) {
+	dir := setup(t)
+	skillContent = []byte("---\nname: agentboard\ndescription: Test skill\n---\n")
+	var out bytes.Buffer
+	cmd := newRootCmd("1.2.3")
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader("# From stdin\n\nbody text\n"))
+	cmd.SetArgs([]string{"--repo", dir, "add", "-"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustRun(t, "--repo", dir, "show", "1"); got != "#1 [backlog] From stdin\n\n# From stdin\n\nbody text\n" {
+		t.Errorf("show output = %q", got)
 	}
 }
 
@@ -78,10 +100,13 @@ func TestAddRejectsInvalidInput(t *testing.T) {
 		t.Errorf("invalid status error = %v", err)
 	}
 	if _, err := run(t, "--repo", dir, "add", "   "); err == nil {
-		t.Error("blank title accepted")
+		t.Error("blank body accepted")
+	}
+	if _, err := run(t, "--repo", dir, "add", "## Context"); err == nil || !strings.Contains(err.Error(), "level-1 heading") {
+		t.Errorf("deep heading error = %v", err)
 	}
 	if _, err := run(t, "--repo", dir, "add"); err == nil {
-		t.Error("missing title accepted")
+		t.Error("missing body accepted")
 	}
 }
 
@@ -138,14 +163,17 @@ func TestMvWithFrom(t *testing.T) {
 	}
 }
 
-func TestEditChangesOnlyGivenFields(t *testing.T) {
+func TestEditReplacesBody(t *testing.T) {
 	dir := setup(t)
 	mustRun(t, "--repo", dir, "add", "old title", "-s", "todo")
-	if out := mustRun(t, "--repo", dir, "edit", "1", "-t", "new title"); out != "#1 [todo] new title\n" {
+	if out := mustRun(t, "--repo", dir, "edit", "1", "# new title\n\nfindings"); out != "#1 [todo] new title\n" {
 		t.Errorf("edit output = %q", out)
 	}
 	if _, err := run(t, "--repo", dir, "edit", "1"); err == nil {
-		t.Error("edit without flags accepted")
+		t.Error("edit without body accepted")
+	}
+	if _, err := run(t, "--repo", dir, "edit", "1", " "); err == nil {
+		t.Error("edit with blank body accepted")
 	}
 }
 
@@ -158,7 +186,7 @@ func TestRmAndBadIDs(t *testing.T) {
 	if out := mustRun(t, "--repo", dir, "ls"); out != "" {
 		t.Errorf("ls after rm = %q", out)
 	}
-	for _, args := range [][]string{{"rm", "1"}, {"rm", "abc"}, {"mv", "0", "done"}, {"edit", "-3", "-t", "x"}} {
+	for _, args := range [][]string{{"rm", "1"}, {"rm", "abc"}, {"mv", "0", "done"}, {"edit", "-3", "x"}} {
 		if _, err := run(t, append([]string{"--repo", dir}, args...)...); err == nil {
 			t.Errorf("%v returned no error", args)
 		}

@@ -50,9 +50,9 @@ func (e env) do(t *testing.T, method, target, body string) *httptest.ResponseRec
 	return rec
 }
 
-func (e env) add(t *testing.T, repo, title string, status task.Status) task.Task {
+func (e env) add(t *testing.T, repo, body string, status task.Status) task.Task {
 	t.Helper()
-	tk, err := e.store.Add(context.Background(), repo, title, "", status)
+	tk, err := e.store.Add(context.Background(), repo, body, status)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestListTasksIncludesStatusesInOrder(t *testing.T) {
 	if strings.Join(statusNames(got.Statuses), ",") != "backlog,todo,doing,done" {
 		t.Errorf("statuses = %v", got.Statuses)
 	}
-	if len(got.Tasks) != 1 || got.Tasks[0].Title != "done too" {
+	if len(got.Tasks) != 1 || got.Tasks[0].Title() != "done too" {
 		t.Errorf("tasks = %+v", got.Tasks)
 	}
 	expectStatus(t, e.do(t, "GET", "/api/tasks", ""), 400)
@@ -121,14 +121,16 @@ func statusNames(ss []task.Status) []string {
 
 func TestCreateTask(t *testing.T) {
 	e := newEnv(t, nil)
-	rec := e.do(t, "POST", tasksURL(repoA), `{"title":"New card","description":"d"}`)
+	rec := e.do(t, "POST", tasksURL(repoA), `{"body":"New card\n\n## Context\nd"}`)
 	expectStatus(t, rec, 201)
-	if got := decode[task.Task](t, rec); got.Title != "New card" || got.Status != task.Backlog || got.Repo != repoA {
+	got := decode[map[string]any](t, rec)
+	if got["title"] != "New card" || got["body"] != "# New card\n\n## Context\nd" || got["status"] != "backlog" || got["repo"] != repoA {
 		t.Errorf("created = %+v", got)
 	}
-	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `{"title":"  "}`), 400)
-	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `{"title":"x","status":"later"}`), 400)
-	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `{"title":"x","state":"todo"}`), 400)
+	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `{"body":"  "}`), 400)
+	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `{"body":"## Context"}`), 400)
+	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `{"body":"x","status":"later"}`), 400)
+	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `{"title":"x"}`), 400)
 	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `not json`), 400)
 }
 
@@ -142,9 +144,9 @@ func TestPatchTask(t *testing.T) {
 		t.Errorf("conflict body = %+v, want current doing", got)
 	}
 
-	rec = e.do(t, "PATCH", taskURL(tk.ID, repoA), `{"title":"renamed"}`)
+	rec = e.do(t, "PATCH", taskURL(tk.ID, repoA), `{"body":"# renamed\n\nmore"}`)
 	expectStatus(t, rec, 200)
-	if got := decode[task.Task](t, rec); got.Title != "renamed" || got.Status != task.Doing {
+	if got := decode[task.Task](t, rec); got.Body != "# renamed\n\nmore" || got.Status != task.Doing {
 		t.Errorf("patched = %+v", got)
 	}
 
@@ -164,7 +166,7 @@ func TestDeleteTask(t *testing.T) {
 func TestRejectsForeignHost(t *testing.T) {
 	e := newEnv(t, nil)
 	for _, host := range []string{"evil.example", "evil.example:7420", "127.0.0.1.evil.example"} {
-		req := httptest.NewRequest("POST", tasksURL(repoA), strings.NewReader(`{"title":"x"}`))
+		req := httptest.NewRequest("POST", tasksURL(repoA), strings.NewReader(`{"body":"x"}`))
 		req.Host = host
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
@@ -190,14 +192,14 @@ func TestWritesRequireJSON(t *testing.T) {
 		{"POST", tasksURL(repoA)},
 		{"PATCH", taskURL(tk.ID, repoA)},
 	} {
-		req := httptest.NewRequest(tc.method, tc.target, strings.NewReader(`{"title":"x"}`))
+		req := httptest.NewRequest(tc.method, tc.target, strings.NewReader(`{"body":"x"}`))
 		req.Host = "127.0.0.1:7420"
 		req.Header.Set("Content-Type", "text/plain")
 		rec := httptest.NewRecorder()
 		e.h.ServeHTTP(rec, req)
 		expectStatus(t, rec, 415)
 	}
-	if got, _ := e.store.List(context.Background(), repoA, nil); len(got) != 1 || got[0].Title != "card" {
+	if got, _ := e.store.List(context.Background(), repoA, nil); len(got) != 1 || got[0].Title() != "card" {
 		t.Errorf("non-JSON write changed the DB: %+v", got)
 	}
 }
