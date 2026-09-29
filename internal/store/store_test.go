@@ -211,3 +211,110 @@ func checkErrs(t *testing.T, errs chan error) {
 		}
 	}
 }
+
+func ptr[T any](v T) *T { return &v }
+
+func get(t *testing.T, s *Store, repo string, id int64) task.Task {
+	t.Helper()
+	tasks, err := s.List(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tk := range tasks {
+		if tk.ID == id {
+			return tk
+		}
+	}
+	t.Fatalf("task #%d not in %s", id, repo)
+	return task.Task{}
+}
+
+func TestUpdateMovesWithMatchingFrom(t *testing.T) {
+	s, _ := openTemp(t)
+	tk := mustAdd(t, s, "/r", "claim me", task.Todo)
+	got, err := s.Update(context.Background(), "/r", tk.ID, task.Patch{Status: ptr(task.Doing), From: ptr(task.Todo)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != task.Doing || get(t, s, "/r", tk.ID).Status != task.Doing {
+		t.Errorf("status not updated: %+v", got)
+	}
+}
+
+func TestUpdateConflictLeavesTaskUnchanged(t *testing.T) {
+	s, _ := openTemp(t)
+	tk := mustAdd(t, s, "/r", "taken", task.Doing)
+	_, err := s.Update(context.Background(), "/r", tk.ID, task.Patch{Status: ptr(task.Done), From: ptr(task.Todo)})
+
+	var conflict *task.ConflictError
+	if !errors.As(err, &conflict) || conflict.Current != task.Doing {
+		t.Fatalf("error = %v, want ConflictError with current doing", err)
+	}
+	if got := get(t, s, "/r", tk.ID); got.Status != task.Doing {
+		t.Errorf("status changed to %s", got.Status)
+	}
+}
+
+func TestUpdateChangesOnlyGivenFields(t *testing.T) {
+	s, _ := openTemp(t)
+	tk, err := s.Add(context.Background(), "/r", "old", "keep this", task.Todo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Update(context.Background(), "/r", tk.ID, task.Patch{Title: ptr("  new  ")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := get(t, s, "/r", tk.ID)
+	for _, x := range []task.Task{got, stored} {
+		if x.Title != "new" || x.Description != "keep this" || x.Status != task.Todo {
+			t.Errorf("unexpected task after title patch: %+v", x)
+		}
+	}
+}
+
+func TestUpdateValidatesPatch(t *testing.T) {
+	s, _ := openTemp(t)
+	tk := mustAdd(t, s, "/r", "x", task.Todo)
+	for _, p := range []task.Patch{{}, {From: ptr(task.Todo)}, {Title: ptr(" ")}} {
+		if _, err := s.Update(context.Background(), "/r", tk.ID, p); err == nil {
+			t.Errorf("Update(%+v) returned no error", p)
+		}
+	}
+}
+
+func TestUpdateAndDeleteAreRepoScoped(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	tk := mustAdd(t, s, "/a", "belongs to a", task.Todo)
+
+	if _, err := s.Update(ctx, "/b", tk.ID, task.Patch{Status: ptr(task.Done)}); !errors.Is(err, task.ErrNotFound) {
+		t.Errorf("cross-repo Update error = %v, want ErrNotFound", err)
+	}
+	if err := s.Delete(ctx, "/b", tk.ID); !errors.Is(err, task.ErrNotFound) {
+		t.Errorf("cross-repo Delete error = %v, want ErrNotFound", err)
+	}
+	if got := get(t, s, "/a", tk.ID); got.Status != task.Todo {
+		t.Errorf("task changed by other repo: %+v", got)
+	}
+	if _, err := s.Update(ctx, "/a", 999, task.Patch{Status: ptr(task.Done)}); !errors.Is(err, task.ErrNotFound) {
+		t.Errorf("missing id Update error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestDeleteDoesNotReuseIDs(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	mustAdd(t, s, "/r", "first", task.Todo)
+	last := mustAdd(t, s, "/r", "last", task.Todo)
+	if err := s.Delete(ctx, "/r", last.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(ctx, "/r", last.ID); !errors.Is(err, task.ErrNotFound) {
+		t.Errorf("second Delete error = %v, want ErrNotFound", err)
+	}
+	next := mustAdd(t, s, "/r", "next", task.Todo)
+	if next.ID <= last.ID {
+		t.Errorf("id %d reused after deleting %d", next.ID, last.ID)
+	}
+}

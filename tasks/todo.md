@@ -83,12 +83,12 @@ Her görev için ortak bitiş koşulu: `gofmt -l .` boş çıktı verir, `go vet
 **Açıklama:** İlk uçtan uca dilim. Root komutun `PersistentPreRunE` adımı DB dizinini çözer (`AGENTBOARD_HOME`, yoksa `~/.agentboard`), store'u açar ve repoyu `--repo` flag'inden veya `cwd`'den çözer. `add <title> [-d] [-s]` görevi ekleyip satırını yazar. `ls [-s]` filtre verilmezse `task.ActiveStatuses` kullanır. Komutlar çıktıyı `cmd.OutOrStdout()` üzerinden yazar.
 
 **Kabul kriterleri:**
-- [ ] `agentboard add "X"` görevi `backlog` durumunda ekler ve `#1 [backlog] X` yazar.
-- [ ] `agentboard ls` `done` görevlerini göstermez; `agentboard ls -s done` sadece `done` görevlerini gösterir.
-- [ ] Geçersiz `-s` değeri anlaşılır bir hata ve sıfırdan farklı exit code verir.
+- [x] `agentboard add "X"` görevi `backlog` durumunda ekler ve `#1 [backlog] X` yazar.
+- [x] `agentboard ls` `done` görevlerini göstermez; `agentboard ls -s done` sadece `done` görevlerini gösterir.
+- [x] Geçersiz `-s` değeri anlaşılır bir hata ve sıfırdan farklı exit code verir.
 
 **Doğrulama:**
-- [ ] `go test ./internal/cli/...` (root komut, geçici `AGENTBOARD_HOME` ve geçici git reposu ile çalıştırılır)
+- [x] `go test ./internal/cli/...` (root komut, geçici `AGENTBOARD_HOME` ve geçici git reposu ile çalıştırılır)
 
 **Bağımlılıklar:** Görev 2, Görev 3
 
@@ -104,13 +104,13 @@ Her görev için ortak bitiş koşulu: `gofmt -l .` boş çıktı verir, `go vet
 **Açıklama:** `task` paketine `Patch` tipini ekler: `Title`, `Description`, `Status` ve `From` alanları opsiyoneldir. `Patch.Validate()` boş patch'i, `Status` olmadan verilen `From`'u ve geçersiz başlığı reddeder. `store.Update(ctx, repo, id, patch)` tek bir immediate transaction içinde görevi okur. Görev bulunamazsa `ErrNotFound` döner. `From` verildiyse ve mevcut durum farklıysa mevcut durumu içeren çakışma hatası döner. Aksi halde sadece verilen alanları ve `updated_at`'i günceller. Taşıma ve düzenleme aynı metodu kullanır (DRY). `Delete(ctx, repo, id)` görevi siler veya `ErrNotFound` döner.
 
 **Kabul kriterleri:**
-- [ ] `From` yanlışsa görev değişmez ve hata mesajı mevcut durumu içerir.
-- [ ] Sadece başlık içeren bir patch durumu ve açıklamayı değiştirmez; boş patch ve `Status`'süz `From` doğrulama hatası verir.
-- [ ] Başka reponun görev ID'si ile `Update` ve `Delete` çağrısı `ErrNotFound` döner ve o satır değişmeden kalır.
-- [ ] En büyük ID'li görev silindikten sonra eklenen görev yeni bir ID alır (`AUTOINCREMENT`).
+- [x] `From` yanlışsa görev değişmez ve hata mesajı mevcut durumu içerir.
+- [x] Sadece başlık içeren bir patch durumu ve açıklamayı değiştirmez; boş patch ve `Status`'süz `From` doğrulama hatası verir.
+- [x] Başka reponun görev ID'si ile `Update` ve `Delete` çağrısı `ErrNotFound` döner ve o satır değişmeden kalır.
+- [x] En büyük ID'li görev silindikten sonra eklenen görev yeni bir ID alır (`AUTOINCREMENT`).
 
 **Doğrulama:**
-- [ ] `go test -race ./internal/task/... ./internal/store/...`
+- [x] `go test -race ./internal/task/... ./internal/store/...`
 
 **Bağımlılıklar:** Görev 2
 
@@ -125,24 +125,24 @@ Her görev için ortak bitiş koşulu: `gofmt -l .` boş çıktı verir, `go vet
 **Açıklama:** `mv <id> <status> [--from status]`, `edit <id> [-t title] [-d description]` ve `rm <id>` komutlarını ekler. `mv` ve `edit` aynı `store.Update` metodunu çağırır. Domain hataları kullanıcıya okunur mesaj ve sıfırdan farklı exit code olarak döner.
 
 **Kabul kriterleri:**
-- [ ] `agentboard mv 1 doing --from todo` görev `todo` durumunda değilse hata verir ve görevi değiştirmez.
-- [ ] `agentboard edit 1 -t "Yeni başlık"` sadece başlığı değiştirir; flag verilmezse hata verir.
-- [ ] `agentboard rm 1` görevi siler; olmayan veya sayı olmayan ID için anlaşılır bir hata verir.
+- [x] `agentboard mv 1 doing --from todo` görev `todo` durumunda değilse hata verir ve görevi değiştirmez.
+- [x] `agentboard edit 1 -t "Yeni başlık"` sadece başlığı değiştirir; flag verilmezse hata verir.
+- [x] `agentboard rm 1` görevi siler; olmayan veya sayı olmayan ID için anlaşılır bir hata verir.
 
 **Doğrulama:**
-- [ ] `go test ./internal/cli/...`
+- [x] `go test ./internal/cli/...`
 
 **Bağımlılıklar:** Görev 4, Görev 5
 
 **Dokunulacak dosyalar:**
-- `internal/cli/mv.go`, `internal/cli/edit.go`, `internal/cli/rm.go`
+- `internal/cli/update.go` (üç komut ortak `updateTask` ve `parseID` yardımcılarını paylaştığı için tek dosya)
 - `internal/cli/cli_test.go`
 
 **Kapsam:** S
 
 ### Kontrol noktası: CLI uçtan uca
-- [ ] `go build ./cmd/agentboard` ile derlenen binary, geçici bir `AGENTBOARD_HOME` ile şu akışı tamamlar: `add`, `ls`, `mv --from`, `edit`, `rm`.
-- [ ] Aynı reponun iki worktree'sinden çalıştırılan `ls` aynı listeyi gösterir.
+- [x] `go build ./cmd/agentboard` ile derlenen binary, geçici bir `AGENTBOARD_HOME` ile şu akışı tamamlar: `add`, `ls`, `mv --from`, `edit`, `rm`.
+- [x] Aynı reponun iki worktree'sinden çalıştırılan `ls` aynı listeyi gösterir.
 - [ ] İnsan incelemesi, sonra Faz 3.
 
 ## Faz 3: MCP

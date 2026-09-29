@@ -83,3 +83,30 @@ func TestConflictError(t *testing.T) {
 		t.Errorf("error %q does not mention current status", err)
 	}
 }
+
+func ptr[T any](v T) *T { return &v }
+
+func TestPatchValidate(t *testing.T) {
+	p, err := Patch{Title: ptr("  New title "), Status: ptr(Doing), From: ptr(Todo)}.Validate()
+	if err != nil {
+		t.Fatalf("Validate error: %v", err)
+	}
+	if *p.Title != "New title" {
+		t.Errorf("title not trimmed: %q", *p.Title)
+	}
+}
+
+func TestPatchValidateRejects(t *testing.T) {
+	cases := map[string]Patch{
+		"empty":          {},
+		"from only":      {From: ptr(Todo)},
+		"blank title":    {Title: ptr("  ")},
+		"invalid status": {Status: ptr(Status("later"))},
+		"invalid from":   {Status: ptr(Doing), From: ptr(Status("later"))},
+	}
+	for name, p := range cases {
+		if _, err := p.Validate(); err == nil {
+			t.Errorf("%s: Validate returned no error", name)
+		}
+	}
+}

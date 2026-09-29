@@ -154,10 +154,73 @@ func (s *Store) Add(ctx context.Context, repo, title, description string, status
 	}, nil
 }
 
+// Update applies p to task id in repo inside one transaction.
+// It returns task.ErrNotFound when the task is not in repo and *task.ConflictError when
+// p.From is set and the task is currently in another status.
+func (s *Store) Update(ctx context.Context, repo string, id int64, p task.Patch) (task.Task, error) {
+	p, err := p.Validate()
+	if err != nil {
+		return task.Task{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return task.Task{}, fmt.Errorf("begin update: %w", err)
+	}
+	defer tx.Rollback()
+
+	tk, err := scanTask(tx.QueryRowContext(ctx, `SELECT `+taskColumns+` FROM tasks WHERE id = ? AND repo = ?`, id, repo))
+	if errors.Is(err, sql.ErrNoRows) {
+		return task.Task{}, fmt.Errorf("#%d: %w", id, task.ErrNotFound)
+	}
+	if err != nil {
+		return task.Task{}, err
+	}
+	if p.From != nil && tk.Status != *p.From {
+		return task.Task{}, &task.ConflictError{ID: id, Current: tk.Status}
+	}
+
+	if p.Title != nil {
+		tk.Title = *p.Title
+	}
+	if p.Description != nil {
+		tk.Description = *p.Description
+	}
+	if p.Status != nil {
+		tk.Status = *p.Status
+	}
+	now := time.Now().Unix()
+	tk.UpdatedAt = time.Unix(now, 0)
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE tasks SET title = ?, description = ?, status = ?, updated_at = ? WHERE id = ?`,
+		tk.Title, tk.Description, string(tk.Status), now, id); err != nil {
+		return task.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return task.Task{}, fmt.Errorf("commit update: %w", err)
+	}
+	return tk, nil
+}
+
+// Delete removes task id from repo or returns task.ErrNotFound.
+func (s *Store) Delete(ctx context.Context, repo string, id int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ? AND repo = ?`, id, repo)
+	if err != nil {
+		return fmt.Errorf("delete task: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete task: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("#%d: %w", id, task.ErrNotFound)
+	}
+	return nil
+}
+
 // List returns the tasks of repo whose status is in statuses (all statuses when empty),
 // ordered by board column and then by id.
 func (s *Store) List(ctx context.Context, repo string, statuses []task.Status) ([]task.Task, error) {
-	query := `SELECT id, repo, title, description, status, created_at, updated_at FROM tasks WHERE repo = ?`
+	query := `SELECT ` + taskColumns + ` FROM tasks WHERE repo = ?`
 	args := []any{repo}
 	if len(statuses) > 0 {
 		query += " AND status IN (?" + strings.Repeat(", ?", len(statuses)-1) + ")"
@@ -192,13 +255,21 @@ func (s *Store) List(ctx context.Context, repo string, statuses []task.Status) (
 	return tasks, nil
 }
 
-func scanTask(rows *sql.Rows) (task.Task, error) {
+// taskColumns is the column list scanTask expects.
+const taskColumns = `id, repo, title, description, status, created_at, updated_at`
+
+// scanner is satisfied by *sql.Row and *sql.Rows.
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanTask(row scanner) (task.Task, error) {
 	var (
 		tk               task.Task
 		status           string
 		created, updated int64
 	)
-	if err := rows.Scan(&tk.ID, &tk.Repo, &tk.Title, &tk.Description, &status, &created, &updated); err != nil {
+	if err := row.Scan(&tk.ID, &tk.Repo, &tk.Title, &tk.Description, &status, &created, &updated); err != nil {
 		return task.Task{}, fmt.Errorf("scan task: %w", err)
 	}
 	tk.Status = task.Status(status)

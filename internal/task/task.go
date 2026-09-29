@@ -68,6 +68,41 @@ func ValidateTitle(title string) (string, error) {
 	return title, nil
 }
 
+// Patch describes a change to a task; nil fields stay unchanged.
+// When From is set the change applies only if the task is currently in From (compare-and-swap).
+type Patch struct {
+	Title       *string
+	Description *string
+	Status      *Status
+	From        *Status
+}
+
+// Validate checks p and returns it with the title normalized.
+func (p Patch) Validate() (Patch, error) {
+	if p.Title == nil && p.Description == nil && p.Status == nil {
+		return Patch{}, errors.New("nothing to change: set title, description or status")
+	}
+	if p.From != nil && p.Status == nil {
+		return Patch{}, errors.New("from requires status")
+	}
+	if p.Title != nil {
+		title, err := ValidateTitle(*p.Title)
+		if err != nil {
+			return Patch{}, err
+		}
+		p.Title = &title
+	}
+	for _, st := range []*Status{p.Status, p.From} {
+		if st == nil {
+			continue
+		}
+		if _, err := ParseStatus(string(*st)); err != nil {
+			return Patch{}, err
+		}
+	}
+	return p, nil
+}
+
 // ErrNotFound is returned when a task does not exist in the given repo.
 var ErrNotFound = errors.New("task not found")
 
