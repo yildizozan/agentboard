@@ -12,3 +12,11 @@
 - **Döngüsel karmaşıklık:** Bağımsız karar yollarını azalt; anlamlı dalları test et. Metrikleri inceleme sinyali olarak kullan, bağlamdan bağımsız sayısal hedef uğruna okunabilirliği bozma.
 - **Yeniden kullanılabilirlik:** Tekrarlanan gerçek davranışı odaklı paketler ve fonksiyonlarla paylaş. Bağımlılıkları açık tut; yapılandırmayı dışarıdan ver. Henüz tek kullanımlık kod için genel çatı kurma.
 - Değişen davranışı ilgili testlerle doğrula; Go (`gofmt`, Effective Go) ve TypeScript adlandırma/biçim düzenini izle.
+
+## Proje
+
+- Go 1.27 (`cmd/`, `internal/`) ve Vite + TypeScript board (`web/`). Plan ve görevler: `tasks/plan.md`, `tasks/todo.md`.
+- Domain kuralları (durumlar, doğrulama, hatalar) yalnızca `internal/task` içinde; CLI, MCP ve HTTP katmanları kalıcılık için yalnızca `internal/store`'u çağırır.
+- MCP server'da stdout protokole aittir; tanı çıktısı stderr'e gider.
+- Doğrulama: `gofmt -l .` boş, `go vet ./...`, `go test -race ./...`; frontend değişikliğinde `npm --prefix web run build`.
+- Release: `v*` tag'i GoReleaser ile GitHub Release üretir; yerel deneme `goreleaser release --snapshot --clean`.

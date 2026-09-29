@@ -11,7 +11,7 @@ import (
 	"github.com/yildizozan/agentboard/internal/mcpserver"
 )
 
-func newServeCmd() *cobra.Command {
+func newServeCmd(opts *options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve",
 		Short: "Run the MCP server over stdio",
@@ -25,7 +25,7 @@ func newServeCmd() *cobra.Command {
 			defer s.Close()
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return mcpserver.New(s).Run(ctx, &mcp.StdioTransport{})
+			return mcpserver.New(s, opts.version).Run(ctx, &mcp.StdioTransport{})
 		},
 	}
 }

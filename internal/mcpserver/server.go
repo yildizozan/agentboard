@@ -54,8 +54,8 @@ type deleteInput struct {
 }
 
 // New returns an MCP server whose tools read and write boards in s.
-func New(s *store.Store) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "agentboard", Version: "dev"}, nil)
+func New(s *store.Store, version string) *mcp.Server {
+	server := mcp.NewServer(&mcp.Implementation{Name: "agentboard", Version: version}, nil)
 	h := handlers{store: s}
 
 	mcp.AddTool(server, &mcp.Tool{

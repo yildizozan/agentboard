@@ -25,7 +25,7 @@ func connect(t *testing.T) *mcp.ClientSession {
 
 	ctx := context.Background()
 	serverT, clientT := mcp.NewInMemoryTransports()
-	ss, err := New(s).Connect(ctx, serverT, nil)
+	ss, err := New(s, "test").Connect(ctx, serverT, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

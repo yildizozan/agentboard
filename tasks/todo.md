@@ -314,12 +314,12 @@ Faz 4 yalnızca Faz 2'ye bağlıdır; Faz 3 ile paralel yürütülebilir.
 **Açıklama:** `.goreleaser.yaml` (`version: 2`) `before.hooks` içinde UI'yi build eder ve `./cmd/agentboard`'u `CGO_ENABLED=0` ile `darwin`/`linux`, `amd64`/`arm64` için derler. Sürüm `-ldflags` ile cobra root'un `Version` alanına verilir. `ci.yml` her push ve PR'da Go testlerini ve UI build'ini çalıştırır. `release.yml` `v*` tag'inde `goreleaser/goreleaser-action` ile GitHub Release oluşturur. Seçilen lisans `LICENSE` dosyası olarak eklenir. Public `yildizozan/agentboard` reposu kullanıcının açık onayından sonra oluşturulur ve ilk push yapılır.
 
 **Kabul kriterleri:**
-- [ ] `goreleaser check` config'i geçerli bulur.
-- [ ] `goreleaser release --snapshot --clean` ile üretilen darwin/arm64 binary'si `board` komutunda UI'yi sunar ve `--version` sürümü yazar.
+- [x] `goreleaser check` config'i geçerli bulur.
+- [x] `goreleaser release --snapshot --clean` ile üretilen darwin/arm64 binary'si `board` komutunda UI'yi sunar ve `--version` sürümü yazar.
 - [ ] Public repoya ilk push sonrası `ci.yml` yeşil biter.
 
 **Doğrulama:**
-- [ ] Yerel: `brew install goreleaser`, sonra `goreleaser check` ve `goreleaser release --snapshot --clean`
+- [x] Yerel: `go run github.com/goreleaser/goreleaser/v2@v2.18.2 check` ve `... release --snapshot --clean` (goreleaser sisteme kurulmadan)
 - [ ] GitHub: `gh run list` ile CI sonucu kontrol edilir.
 
 **Bağımlılıklar:** Görev 1, Görev 11
@@ -337,8 +337,8 @@ Faz 4 yalnızca Faz 2'ye bağlıdır; Faz 3 ile paralel yürütülebilir.
 
 **Kabul kriterleri:**
 - [ ] README'deki kurulum adımları temiz bir makinede takip edildiğinde MCP server ve board çalışır.
-- [ ] Agent talimat snippet'i agent'a ne zaman görev ekleyeceğini, ne zaman `doing`'e çekeceğini (`from` ile), ne zaman görevi güncelleyeceğini ve ne zaman `done` yapacağını söyler.
-- [ ] `AGENTS.md` içinde Godot, GDScript, sahne veya oyun kuralı referansı kalmaz.
+- [x] Agent talimat snippet'i agent'a ne zaman görev ekleyeceğini, ne zaman `doing`'e çekeceğini (`from` ile), ne zaman görevi güncelleyeceğini ve ne zaman `done` yapacağını söyler.
+- [x] `AGENTS.md` içinde Godot, GDScript, sahne veya oyun kuralı referansı kalmaz.
 
 **Doğrulama:**
 - [ ] Manuel: README'deki komutlar sırayla çalıştırılır.

@@ -12,7 +12,7 @@ import (
 func run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	cmd := newRootCmd()
+	cmd := newRootCmd("1.2.3")
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs(args)
@@ -184,5 +184,11 @@ func TestBoardRejectsNonLoopbackAddr(t *testing.T) {
 		if err := checkLoopback(addr); err != nil {
 			t.Errorf("checkLoopback(%s) = %v", addr, err)
 		}
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	if out := mustRun(t, "--version"); !strings.Contains(out, "1.2.3") {
+		t.Errorf("--version = %q", out)
 	}
 }

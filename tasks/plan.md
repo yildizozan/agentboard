@@ -139,12 +139,13 @@ Global flag: `--repo <dir>`. Env: `AGENTBOARD_HOME`.
 
 ### Dağıtım
 
-- **goreleaser** (`.goreleaser.yaml`, `version: 2`). `before.hooks`: `npm --prefix web ci` ve `npm --prefix web run build`. Build: `./cmd/agentboard`, `CGO_ENABLED=0`, `darwin` ve `linux`, `amd64` ve `arm64`. Sürüm `-ldflags` ile cobra'nın `Version` alanına verilir (`agentboard --version`).
+- **goreleaser** (`.goreleaser.yaml`, `version: 2`). `before.hooks`: `npm --prefix web ci` ve `npm --prefix web run build`. Build: `./cmd/agentboard`, `CGO_ENABLED=0`; hedefler `linux/amd64`, `windows/amd64`, `darwin/amd64`, `darwin/arm64`. Windows arşivi zip, diğerleri tar.gz. Sürüm `-ldflags` ile cobra'nın `Version` alanına verilir (`agentboard --version`).
 - **GitHub Actions:**
   - `ci.yml`: her push ve PR'da `go test -race ./...` ve `npm --prefix web ci && npm --prefix web run build`.
   - `release.yml`: `v*` tag'inde goreleaser ile GitHub Release oluşturur.
 - **Repo:** public `github.com/yildizozan/agentboard`. Repo oluşturma ve ilk push kullanıcının açık onayıyla yapılır (Görev 14). Public repo için `LICENSE` dosyası şarttır; lisans yoksa kod varsayılan olarak "tüm hakları saklı" kalır.
-- **Sonraki sürüm:** Windows build ve Homebrew tap. İkisi de gerekli olacak ama MVP'de yok. Tasarım bunları engellememeli: `modernc.org/sqlite` ve `exec git` Windows'ta çalışır. Windows'ta geliştirme yapılacaksa npm `build` script'indeki `touch` platformdan bağımsız bir komutla değiştirilir. Homebrew tap ayrı bir `yildizozan/homebrew-tap` reposu ve goreleaser'da `brews` bölümü ister.
+- **Windows:** İlk release'e alındı (`windows/amd64`). CI Windows için sadece çapraz derleme ve `go vet` çalıştırır; testler Linux'ta koşar, Windows'ta çalışma zamanı testi yoktur. Windows'ta geliştirme yapılacaksa npm `build` script'indeki `touch` platformdan bağımsız bir komutla değiştirilir.
+- **Sonraki sürüm:** Homebrew tap. Homebrew tap ayrı bir `yildizozan/homebrew-tap` reposu ve goreleaser'da `brews` bölümü ister.
 
 ### Paket yapısı
 

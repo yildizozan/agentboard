@@ -18,12 +18,14 @@ const homeEnv = "AGENTBOARD_HOME"
 // options holds values shared by all subcommands.
 type options struct {
 	repoDir string
+	version string
 }
 
-func newRootCmd() *cobra.Command {
-	var opts options
+func newRootCmd(version string) *cobra.Command {
+	opts := options{version: version}
 	cmd := &cobra.Command{
 		Use:           "agentboard",
+		Version:       version,
 		Short:         "Repo-scoped task board for coding agents",
 		Long:          "agentboard keeps a backlog/todo/doing/done board per repository.\nAgents use it over MCP; humans use the CLI or the web board.",
 		SilenceUsage:  true,
@@ -34,13 +36,13 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 	cmd.PersistentFlags().StringVar(&opts.repoDir, "repo", "", "directory used to resolve the repository (default: current directory)")
-	cmd.AddCommand(newAddCmd(&opts), newLsCmd(&opts), newMvCmd(&opts), newEditCmd(&opts), newRmCmd(&opts), newServeCmd(), newBoardCmd(&opts))
+	cmd.AddCommand(newAddCmd(&opts), newLsCmd(&opts), newMvCmd(&opts), newEditCmd(&opts), newRmCmd(&opts), newServeCmd(&opts), newBoardCmd(&opts))
 	return cmd
 }
 
-// Execute runs the CLI and returns the process exit code.
-func Execute() int {
-	if err := newRootCmd().Execute(); err != nil {
+// Execute runs the CLI with the given build version and returns the process exit code.
+func Execute(version string) int {
+	if err := newRootCmd(version).Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 1
 	}
