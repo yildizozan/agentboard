@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -219,4 +221,36 @@ func TestServesUIAndPlaceholder(t *testing.T) {
 		t.Errorf("placeholder body = %q", rec.Body.String())
 	}
 	expectStatus(t, empty.do(t, "GET", "/api/repos", ""), 200)
+}
+
+func TestListTasksOfEmptyRepoIsEmptyArray(t *testing.T) {
+	e := newEnv(t, nil)
+	rec := e.do(t, "GET", tasksURL(repoB), "")
+	expectStatus(t, rec, 200)
+	// The board calls tasks.filter; null would break it.
+	if !strings.Contains(rec.Body.String(), `"tasks":[]`) {
+		t.Errorf("body = %s, want an empty tasks array", rec.Body.String())
+	}
+}
+
+func TestRejectsOversizedBody(t *testing.T) {
+	e := newEnv(t, nil)
+	big := `{"body":"# big ` + strings.Repeat("a", maxBody) + `"}`
+	expectStatus(t, e.do(t, "POST", tasksURL(repoA), big), 400)
+	if repos, _ := e.store.Repos(context.Background()); len(repos) != 0 {
+		t.Errorf("oversized body was stored: %v", repos)
+	}
+}
+
+func TestInternalErrorHidesDetails(t *testing.T) {
+	e := newEnv(t, nil)
+	e.store.Close() // every query now fails inside database/sql
+	log.SetOutput(io.Discard)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	rec := e.do(t, "GET", "/api/repos", "")
+	expectStatus(t, rec, 500)
+	if got := decode[errorJSON](t, rec); got.Error != "internal error" {
+		t.Errorf("error = %q, want the generic message", got.Error)
+	}
 }
