@@ -31,7 +31,7 @@ jobs:
         run: go build .
       - name: Cross-compile release targets
         run: |
-          for target in windows/amd64 darwin/amd64 darwin/arm64; do
+          for target in windows/amd64 darwin/arm64; do
             GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go vet ./...
             GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null .
           done

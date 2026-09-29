@@ -19,15 +19,20 @@ compare-and-swap (`from`), so two agents cannot both claim the same task.
 
 ## Install
 
-Download a binary from [GitHub Releases](https://github.com/yildizozan/agentboard/releases)
-and put `agentboard` (`agentboard.exe` on Windows) on your `PATH`:
+Download the binary for your platform from
+[GitHub Releases](https://github.com/yildizozan/agentboard/releases), rename it to
+`agentboard` (`agentboard.exe` on Windows) and put it on your `PATH`:
 
-| Platform              | Archive                                    |
-|-----------------------|--------------------------------------------|
-| Linux x86-64          | `agentboard_<version>_linux_amd64.tar.gz`  |
-| Windows x86-64        | `agentboard_<version>_windows_amd64.zip`   |
-| macOS Intel           | `agentboard_<version>_darwin_amd64.tar.gz` |
-| macOS Apple Silicon   | `agentboard_<version>_darwin_arm64.tar.gz` |
+| Platform            | Binary                           |
+|---------------------|----------------------------------|
+| Linux x86-64        | `agentboard_linux_amd64`         |
+| Windows x86-64      | `agentboard_windows_amd64.exe`   |
+| macOS Apple Silicon | `agentboard_darwin_arm64`        |
+
+```bash
+curl -fLo agentboard https://github.com/yildizozan/agentboard/releases/latest/download/agentboard_darwin_arm64
+chmod +x agentboard
+```
 
 Verify a download against `checksums.txt` from the same release.
 

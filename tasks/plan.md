@@ -139,7 +139,7 @@ Global flag: `--repo <dir>`. Env: `AGENTBOARD_HOME`.
 
 ### Dağıtım
 
-- **goreleaser** (`.goreleaser.yaml`, `version: 2`). `before.hooks`: `npm --prefix web ci` ve `npm --prefix web run build`. Build: `./cmd/agentboard`, `CGO_ENABLED=0`; hedefler `linux/amd64`, `windows/amd64`, `darwin/amd64`, `darwin/arm64`. Windows arşivi zip, diğerleri tar.gz. Sürüm `-ldflags` ile cobra'nın `Version` alanına verilir (`agentboard --version`).
+- **goreleaser** (`.goreleaser.yaml`, `version: 2`). `before.hooks`: `npm --prefix web ci` ve `npm --prefix web run build`. Build: `./cmd/agentboard`, `CGO_ENABLED=0`; hedefler `linux/amd64`, `windows/amd64`, `darwin/arm64`. Arşiv yok; ham binary'ler `agentboard_<os>_<arch>` adıyla yüklenir (Windows'ta `.exe`). Sürüm `-ldflags` ile cobra'nın `Version` alanına verilir (`agentboard --version`).
 - **GitHub Actions:**
   - `ci.yml`: her push ve PR'da `go test -race ./...` ve `npm --prefix web ci && npm --prefix web run build`.
   - `release.yml`: `v*` tag'inde goreleaser ile GitHub Release oluşturur.

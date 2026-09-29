@@ -16,19 +16,15 @@ builds:
     targets:
       - linux_amd64
       - windows_amd64
-      - darwin_amd64
       - darwin_arm64
     flags: [-trimpath]
     ldflags:
       - -s -w -X main.version={{ .Version }}
 
+# Raw binaries are uploaded as agentboard_<os>_<arch>; GoReleaser appends .exe on Windows.
 archives:
-  - formats: [tar.gz]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format_overrides:
-      - goos: windows
-        formats: [zip]
-    files: [LICENSE, README.md]
+  - formats: [binary]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: checksums.txt
