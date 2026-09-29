@@ -152,12 +152,12 @@ Her görev için ortak bitiş koşulu: `gofmt -l .` boş çıktı verir, `go vet
 **Açıklama:** `mcpserver.New(store)` resmi go-sdk ile bir `*mcp.Server` kurar ve typed `mcp.AddTool` ile `task_add` ve `task_list` tool'larını kaydeder. Her tool zorunlu `cwd` parametresi alır ve repoyu her çağrıda `repo.Resolve(cwd)` ile çözer; göreli veya var olmayan yol tool hatası döner. Tool açıklamaları durumların anlamını ve ne zaman kullanılacağını içerir. `serve` komutu server'ı `mcp.StdioTransport` üzerinde çalıştırır ve stdout'a protokol dışında hiçbir şey yazmaz. Handler hatasının tool hatasına (`IsError`) nasıl eşlendiği SDK dokümantasyonundan doğrulanır.
 
 **Kabul kriterleri:**
-- [ ] In-memory transport ile bağlanan client `ListTools` ile iki tool ve input şemalarını görür.
-- [ ] `task_add` çağrısı `#1 [backlog] ...` içeren metin döner; `task_list` varsayılan olarak `done` göstermez.
-- [ ] Geçersiz durum değeri ile göreli veya var olmayan `cwd` protokol hatası değil, `IsError: true` olan bir tool sonucu döner.
+- [x] In-memory transport ile bağlanan client `ListTools` ile iki tool ve input şemalarını görür.
+- [x] `task_add` çağrısı `#1 [backlog] ...` içeren metin döner; `task_list` varsayılan olarak `done` göstermez.
+- [x] Geçersiz durum değeri ile göreli veya var olmayan `cwd` protokol hatası değil, `IsError: true` olan bir tool sonucu döner.
 
 **Doğrulama:**
-- [ ] `go test ./internal/mcpserver/...` (`mcp.NewInMemoryTransports()` ile)
+- [x] `go test ./internal/mcpserver/...` (`mcp.NewInMemoryTransports()` ile)
 
 **Bağımlılıklar:** Görev 4
 
@@ -173,12 +173,12 @@ Her görev için ortak bitiş koşulu: `gofmt -l .` boş çıktı verir, `go vet
 **Açıklama:** Kalan üç tool'u ekler. `task_move` (`id`, `status`, `from?`) ve `task_update` (`id`, `title?`, `description?`) aynı `store.Update` metodunu çağırır. Agent için anlamları net kalsın diye ayrı tool'lardır (ISP). `task_move` opsiyonel `from` parametresi ile compare-and-swap yapar.
 
 **Kabul kriterleri:**
-- [ ] `from` uyuşmazlığında sonuç `IsError: true` olur ve mesaj görevin mevcut durumunu içerir.
-- [ ] Repo A'nın `cwd`'si ile yapılan çağrı, repo B'nin görevini taşıyamaz, düzenleyemez ve silemez; aynı server iki repoya da doğru hizmet eder.
-- [ ] `task_update` sonrası `task_list` yeni başlığı gösterir; `task_delete` sonrası görevi göstermez.
+- [x] `from` uyuşmazlığında sonuç `IsError: true` olur ve mesaj görevin mevcut durumunu içerir.
+- [x] Repo A'nın `cwd`'si ile yapılan çağrı, repo B'nin görevini taşıyamaz, düzenleyemez ve silemez; aynı server iki repoya da doğru hizmet eder.
+- [x] `task_update` sonrası `task_list` yeni başlığı gösterir; `task_delete` sonrası görevi göstermez.
 
 **Doğrulama:**
-- [ ] `go test ./internal/mcpserver/...`
+- [x] `go test ./internal/mcpserver/...`
 
 **Bağımlılıklar:** Görev 5, Görev 7
 
