@@ -9,7 +9,7 @@ before:
     - npm --prefix web run build
 
 builds:
-  - main: ./cmd/agentboard
+  - main: .
     binary: agentboard
     env:
       - CGO_ENABLED=0

@@ -34,7 +34,7 @@ Verify a download against `checksums.txt` from the same release.
 Or build from source with Go 1.27+:
 
 ```bash
-go install github.com/yildizozan/agentboard/cmd/agentboard@latest
+go install github.com/yildizozan/agentboard@latest
 ```
 
 `go install` does not build the web UI, so `agentboard board` shows a page
@@ -42,13 +42,29 @@ explaining how to build it. Release binaries include the UI.
 
 ## Connect an agent
 
-Claude Code:
+With Codex and Claude Code installed, register both at user scope (the default):
 
 ```bash
-claude mcp add --scope user agentboard -- agentboard serve
+agentboard install
 ```
 
-Other MCP clients: run `agentboard serve` as a stdio server, for example:
+To register only in the current directory instead, run:
+
+```bash
+agentboard install --scope project
+```
+
+This writes `.codex/config.toml` for Codex and `.mcp.json` for Claude Code in
+the directory where you run it, independent of `--repo`. Codex loads project
+configuration only after you trust the project; Claude Code asks you to approve
+project MCP servers. Re-running project install keeps matching entries and
+reports a conflict rather than replacing a different `agentboard` entry.
+Registration uses the absolute path of the installed `agentboard` binary, so
+move the binary only after re-registering it.
+
+See the [Codex MCP guide](https://learn.chatgpt.com/docs/extend/mcp) and
+[Claude Code MCP guide](https://code.claude.com/docs/en/mcp) for manual setup.
+Other MCP clients can run `agentboard serve` as a stdio server, for example:
 
 ```json
 {
@@ -104,6 +120,7 @@ agentboard mv <id> <status> [--from status]
 agentboard edit <id> [-t title] [-d description]
 agentboard rm <id>
 agentboard serve
+agentboard install [--scope user|project]
 agentboard board [--addr 127.0.0.1:7420]
 agentboard --version
 ```
@@ -144,12 +161,16 @@ Set `AGENTBOARD_HOME` to keep the database somewhere other than `~/.agentboard`.
 
 ## Development
 
+The entry point is `main.go`; Cobra commands live in `cmd/root.go` and
+`cmd/<command>.go`. Run `cobra-cli add <command>` from the repository root to
+scaffold another subcommand.
+
 ```bash
 go test -race ./...
 ```
 
 ```bash
-npm --prefix web ci && npm --prefix web run build && go build ./cmd/agentboard
+npm --prefix web ci && npm --prefix web run build && go build .
 ```
 
 For UI work, run `agentboard board` and `npm --prefix web run dev` side by side;

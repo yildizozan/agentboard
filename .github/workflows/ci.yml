@@ -28,10 +28,10 @@ jobs:
       - name: Build UI
         run: npm --prefix web ci && npm --prefix web run build
       - name: Build binary with UI
-        run: go build ./cmd/agentboard
+        run: go build .
       - name: Cross-compile release targets
         run: |
           for target in windows/amd64 darwin/amd64 darwin/arm64; do
             GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go vet ./...
-            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/agentboard
+            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null .
           done

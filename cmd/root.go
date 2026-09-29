@@ -1,5 +1,4 @@
-// Package cli wires the cobra commands to the store and repo resolution.
-package cli
+package cmd
 
 import (
 	"fmt"
@@ -18,11 +17,12 @@ const homeEnv = "AGENTBOARD_HOME"
 // options holds values shared by all subcommands.
 type options struct {
 	repoDir string
-	version string
 }
 
+var rootCmd = newRootCmd("dev")
+
 func newRootCmd(version string) *cobra.Command {
-	opts := options{version: version}
+	opts := options{}
 	cmd := &cobra.Command{
 		Use:           "agentboard",
 		Version:       version,
@@ -36,13 +36,14 @@ func newRootCmd(version string) *cobra.Command {
 		},
 	}
 	cmd.PersistentFlags().StringVar(&opts.repoDir, "repo", "", "directory used to resolve the repository (default: current directory)")
-	cmd.AddCommand(newAddCmd(&opts), newLsCmd(&opts), newMvCmd(&opts), newEditCmd(&opts), newRmCmd(&opts), newServeCmd(&opts), newBoardCmd(&opts))
+	cmd.AddCommand(newAddCmd(&opts), newLsCmd(&opts), newMvCmd(&opts), newEditCmd(&opts), newRmCmd(&opts), newServeCmd(&opts), newBoardCmd(&opts), newInstallCmd())
 	return cmd
 }
 
 // Execute runs the CLI with the given build version and returns the process exit code.
 func Execute(version string) int {
-	if err := newRootCmd(version).Execute(); err != nil {
+	rootCmd.Version = version
+	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 1
 	}

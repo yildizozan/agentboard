@@ -1,4 +1,4 @@
-package cli
+package cmd
 
 import (
 	"os"
@@ -25,7 +25,7 @@ func newServeCmd(opts *options) *cobra.Command {
 			defer s.Close()
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return mcpserver.New(s, opts.version).Run(ctx, &mcp.StdioTransport{})
+			return mcpserver.New(s, cmd.Root().Version).Run(ctx, &mcp.StdioTransport{})
 		},
 	}
 }
