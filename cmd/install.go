@@ -50,12 +50,18 @@ func installUser(cmd *cobra.Command, binary string) error {
 		return err
 	}
 	for _, entry := range []struct {
-		name string
-		args []string
+		name   string
+		remove []string // run first when add refuses an existing name
+		args   []string
 	}{
-		{"codex", []string{"mcp", "add", "agentboard", "--", binary, "serve"}},
-		{"claude", []string{"mcp", "add", "--scope", "user", "agentboard", "--", binary, "serve"}},
+		{"codex", nil, []string{"mcp", "add", "agentboard", "--", binary, "serve"}},
+		{"claude", []string{"mcp", "remove", "--scope", "user", "agentboard"},
+			[]string{"mcp", "add", "--scope", "user", "agentboard", "--", binary, "serve"}},
 	} {
+		if entry.remove != nil {
+			// Fails when there is nothing to remove; a real problem surfaces in the add below.
+			_ = exec.CommandContext(cmd.Context(), entry.name, entry.remove...).Run()
+		}
 		output, err := exec.CommandContext(cmd.Context(), entry.name, entry.args...).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("register with %s: %w: %s", entry.name, err, strings.TrimSpace(string(output)))

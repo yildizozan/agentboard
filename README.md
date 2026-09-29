@@ -89,10 +89,9 @@ binary. `agentboard install` registers the MCP server and installs the skill
 to `~/.agents/skills/agentboard/` for Codex and `~/.claude/skills/agentboard/`
 for Claude Code on Linux, macOS, and Windows. With `--scope project`, both the
 MCP configuration and skills go into the current directory instead. Run install
-again after upgrading the binary to update the installed skill. If an existing
-user-scoped MCP entry makes a client reject duplicate registration, the skill is
-still updated; inspect that client's existing `agentboard` entry before changing
-it. You can invoke the skill as `$agentboard` in Codex or `/agentboard` in
+again after upgrading or moving the binary: it updates the installed skill and
+replaces the user-scoped `agentboard` MCP entry of both clients with the
+current binary. You can invoke the skill as `$agentboard` in Codex or `/agentboard` in
 Claude Code.
 
 ### Tools

@@ -32,14 +32,7 @@ func TestInstallUserRegistersBothClients(t *testing.T) {
 	if !strings.Contains(output, "codex (user)") || !strings.Contains(output, "claude (user)") {
 		t.Errorf("install output = %q", output)
 	}
-	binary, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	binary, err = filepath.EvalSymlinks(binary)
-	if err != nil {
-		t.Fatal(err)
-	}
+	binary := installedBinary(t)
 	for name, want := range map[string]string{
 		"codex":  "mcp\nadd\nagentboard\n--\n" + binary + "\nserve\n",
 		"claude": "mcp\nadd\n--scope\nuser\nagentboard\n--\n" + binary + "\nserve\n",
@@ -53,6 +46,67 @@ func TestInstallUserRegistersBothClients(t *testing.T) {
 		}
 	}
 	assertInstalledSkills(t, home)
+}
+
+// TestInstallUserReplacesExistingClaudeEntry reruns install over an existing registration,
+// as after an upgrade: claude, unlike codex, refuses to add a name that already exists.
+func TestInstallUserReplacesExistingClaudeEntry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses POSIX shell shims")
+	}
+	shimDir := t.TempDir()
+	registry := t.TempDir()
+	claude := `#!/bin/sh
+entry="$REGISTRY/agentboard"
+case "$1 $2" in
+"mcp remove")
+  [ "$3 $4 $5" = "--scope user agentboard" ] || { echo "unexpected remove: $*"; exit 3; }
+  [ -f "$entry" ] || { echo "No user-scoped MCP server found with name: agentboard"; exit 1; }
+  rm "$entry" ;;
+"mcp add")
+  [ -f "$entry" ] && { echo "MCP server agentboard already exists in user config"; exit 1; }
+  printf '%s\n' "$@" > "$entry" ;;
+*) exit 2 ;;
+esac
+`
+	for name, script := range map[string]string{"claude": claude, "codex": "#!/bin/sh\nexit 0\n"} {
+		if err := os.WriteFile(filepath.Join(shimDir, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(registry, "agentboard"), []byte("old entry\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("REGISTRY", registry)
+	t.Setenv("HOME", t.TempDir())
+
+	for range 2 { // replacing must also work when the previous install left the entry
+		if out, err := run(t, "install"); err != nil {
+			t.Fatalf("install over an existing entry: %v\n%s", err, out)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(registry, "agentboard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(string(got), "--scope\nuser\nagentboard\n--\n"+installedBinary(t)+"\nserve\n") {
+		t.Errorf("claude entry = %q, want the current binary", got)
+	}
+}
+
+// installedBinary is the path install registers: the test binary with symlinks resolved.
+func installedBinary(t *testing.T) string {
+	t.Helper()
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary, err = filepath.EvalSymlinks(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return binary
 }
 
 func TestInstallUserUpdatesSkillsWhenRegistrationFails(t *testing.T) {
