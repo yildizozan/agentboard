@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -58,38 +57,6 @@ func TestOpenMigratesOnce(t *testing.T) {
 	got, err := s2.List(context.Background(), "/r", nil)
 	if err != nil || len(got) != 1 {
 		t.Fatalf("List after reopen = %v, %v; want 1 task", got, err)
-	}
-}
-
-func TestMigrationV2MovesTitleAndDescriptionIntoBody(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agentboard.db")
-	db, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(schemaV1 + `
-		INSERT INTO tasks (repo, title, description, status, created_at, updated_at) VALUES
-			('/r', 'Fix login', 'token expiry', 'todo', 1, 2),
-			('/r', 'No details', '', 'done', 3, 4);
-		PRAGMA user_version = 1;`); err != nil {
-		t.Fatal(err)
-	}
-	db.Close()
-
-	s, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer s.Close()
-	got, err := s.List(context.Background(), "/r", nil)
-	if err != nil || len(got) != 2 {
-		t.Fatalf("List = %v, %v; want 2 tasks", got, err)
-	}
-	if got[0].Body != "# Fix login\n\ntoken expiry" || got[0].Title() != "Fix login" || got[0].UpdatedAt.Unix() != 2 {
-		t.Errorf("migrated task = %+v", got[0])
-	}
-	if got[1].Body != "# No details" {
-		t.Errorf("migrated task without description = %+v", got[1])
 	}
 }
 

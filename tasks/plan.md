@@ -24,8 +24,7 @@ Tek binary, CGO yok. Aynı cobra uygulaması `serve` (MCP stdio), `board` (yerel
 CREATE TABLE tasks (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   repo        TEXT    NOT NULL,
-  title       TEXT    NOT NULL,
-  description TEXT    NOT NULL DEFAULT '',
+  body        TEXT    NOT NULL,
   status      TEXT    NOT NULL,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
@@ -33,6 +32,7 @@ CREATE TABLE tasks (
 CREATE INDEX idx_tasks_repo_status ON tasks(repo, status);
 ```
 
+- **`body`:** Kartın tek içeriği Markdown'dır. İlk satır `# <başlık>` olmak zorundadır; düz ilk satır başlığa çevrilir, `##` ile başlayan ya da boş başlık reddedilir (`task.ValidateBody`). Başlık ayrı saklanmaz, `task.TitleOf` ile body'den türetilir (DRY).
 - **`AUTOINCREMENT`:** Silme agent'lara açık olduğu için şart. Olmazsa en büyük ID silindiğinde aynı numara yeni göreve verilir ve eski `#15`'e referans veren bir agent yanlış görevi taşıyabilir.
 - **`status` için `CHECK` yok:** Geçerli durum listesinin tek kaynağı Go tarafındaki `task.ParseStatus` (DRY). Tüm yazmalar bu fonksiyondan geçer.
 - **Zamanlar:** Unix saniye (`INTEGER`).
@@ -72,13 +72,14 @@ Her tool ayrıca zorunlu `cwd` parametresi alır (agent'ın çalışma dizininin
 
 | Tool | Parametreler | Davranış |
 |---|---|---|
-| `task_add` | `title` (zorunlu), `description?`, `status?` (varsayılan `backlog`) | Görev ekler, oluşan satırı döner |
-| `task_list` | `status?` | Verilmezse `done` hariç tüm görevler. Sıra: durum sırası, sonra `id` |
+| `task_add` | `body` (zorunlu, Markdown), `status?` (varsayılan `backlog`) | Görev ekler, oluşan satırı döner |
+| `task_list` | `status?` | Verilmezse `done` hariç tüm görevler, her biri tek başlık satırı. Sıra: durum sırası, sonra `id` |
+| `task_get` | `id` | Durum satırı ve tam Markdown body |
 | `task_move` | `id`, `status`, `from?` | `from` verilirse compare-and-swap: görev şu an `from` durumunda değilse değişiklik yapılmaz ve mevcut durum hata mesajında döner |
-| `task_update` | `id`, `title?`, `description?` | Sadece verilen alanları günceller; en az biri zorunlu |
+| `task_update` | `id`, `body` | Body'nin tamamını değiştirir |
 | `task_delete` | `id` | Görevi kalıcı olarak siler |
 
-- **Taşıma ve düzenleme tek store metodundan geçer.** `task.Patch` (`Title`, `Description`, `Status`, `From`; hepsi opsiyonel) ve `store.Update(ctx, repo, id, patch)` tek bir immediate transaction içinde çalışır. `task_move`, `task_update`, CLI `mv`/`edit` ve HTTP `PATCH` bu metodu çağırır (DRY). MCP'de iki ayrı tool olmalarının nedeni agent için anlamın net kalmasıdır (ISP).
+- **Taşıma ve düzenleme tek store metodundan geçer.** `task.Patch` (`Body`, `Status`, `From`; hepsi opsiyonel) ve `store.Update(ctx, repo, id, patch)` tek bir immediate transaction içinde çalışır. `task_move`, `task_update`, CLI `mv`/`edit` ve HTTP `PATCH` bu metodu çağırır (DRY). MCP'de iki ayrı tool olmalarının nedeni agent için anlamın net kalmasıdır (ISP).
 
 - Çıktı kompakt metindir: `#12 [doing] Fix login bug`. Satır formatı `task.Task.String()` içinde tek yerde tanımlanır; CLI ve MCP aynısını kullanır (DRY).
 - Domain hataları (bulunamadı, durum çakışması, geçersiz durum) protokol hatası olarak değil, tool hatası (`IsError`) olarak döner; agent mesajı okuyup karar verebilir. SDK'nın handler hatasını nasıl eşlediği uygulama sırasında dokümantasyondan doğrulanacak.
@@ -87,10 +88,11 @@ Her tool ayrıca zorunlu `cwd` parametresi alır (agent'ın çalışma dizininin
 ### CLI arayüzü
 
 ```
-agentboard add <title> [-d description] [-s status]
+agentboard add <body|-> [-s status]
 agentboard ls [-s status]
+agentboard show <id>
 agentboard mv <id> <status> [--from status]
-agentboard edit <id> [-t title] [-d description]
+agentboard edit <id> <body|->
 agentboard rm <id>
 agentboard serve
 agentboard board [--addr 127.0.0.1:7420]
@@ -109,8 +111,8 @@ Global flag: `--repo <dir>`. Env: `AGENTBOARD_HOME`.
 |---|---|---|
 | `GET /api/repos` | | `[{path, name, count}]`; `name` path'in son parçası |
 | `GET /api/tasks?repo=` | | `{statuses, tasks}`; tüm durumlar dahil |
-| `POST /api/tasks?repo=` | `{title, description?, status?}` | `201` ve oluşan görev |
-| `PATCH /api/tasks/{id}?repo=` | `{status?, from?, title?, description?}` (gövde doğrudan `task.Patch`'e eşlenir) | Güncel görev; `from` uyuşmazsa `409` ve `current` alanında mevcut durum |
+| `POST /api/tasks?repo=` | `{body, status?}` | `201` ve oluşan görev; yanıtta türetilmiş `title` da bulunur |
+| `PATCH /api/tasks/{id}?repo=` | `{status?, from?, body?}` (gövde doğrudan `task.Patch`'e eşlenir) | Güncel görev; `from` uyuşmazsa `409` ve `current` alanında mevcut durum |
 | `DELETE /api/tasks/{id}?repo=` | | `204` |
 
 - Repo tüm görev isteklerinde `?repo=` query parametresiyle verilir; gövdeler sadece görev alanlarını taşır ve bilinmeyen alanlar `400` döner.

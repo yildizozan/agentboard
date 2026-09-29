@@ -32,11 +32,8 @@ const lockWait = 5 * time.Second
 //go:embed schema_v1.sql
 var schemaV1 string
 
-//go:embed schema_v2.sql
-var schemaV2 string
-
 // migrations[i] upgrades the schema from user_version i to i+1.
-var migrations = []string{schemaV1, schemaV2}
+var migrations = []string{schemaV1}
 
 // Store is a handle to the task database.
 type Store struct {

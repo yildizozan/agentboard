@@ -1,8 +1,8 @@
+-- Cards hold one Markdown body whose first line is the "# <title>" heading.
 CREATE TABLE tasks (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   repo        TEXT    NOT NULL,
-  title       TEXT    NOT NULL,
-  description TEXT    NOT NULL DEFAULT '',
+  body        TEXT    NOT NULL,
   status      TEXT    NOT NULL,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL

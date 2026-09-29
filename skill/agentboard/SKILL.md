@@ -16,7 +16,7 @@ Use the `agentboard` MCP tools to coordinate work within a repository. The MCP s
 
 ## Card format
 
-Each card is a single Markdown `body`; there are no separate title or description fields.
+Each card is a single Markdown `body`.
 
 - The first line is the card title as a level-1 heading: `# Fix login token expiry`. Keep it short and specific; the board preview and `task_list` show only this line.
 - A plain first line is turned into the heading automatically. A first line starting with `##` or a blank title is rejected.
