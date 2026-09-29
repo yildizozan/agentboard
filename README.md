@@ -77,6 +77,25 @@ Other MCP clients can run `agentboard serve` as a stdio server, for example:
 One server serves every repository. Each tool call carries the agent's working
 directory (`cwd`), and the board is chosen from it per call.
 
+### Agent skill
+
+This repository includes an [agentboard skill](.agents/skills/agentboard/SKILL.md)
+for Codex and Claude Code. It guides agents through listing, claiming, updating,
+and completing tasks using the MCP tools. The project skill loads when working
+in this repository; user-scoped MCP registration alone does not load it in
+other repositories. To use it across projects, copy it to both clients' personal
+skill directories:
+
+```bash
+mkdir -p "$HOME/.agents/skills/agentboard" "$HOME/.claude/skills/agentboard"
+cp .agents/skills/agentboard/SKILL.md "$HOME/.agents/skills/agentboard/SKILL.md"
+cp .agents/skills/agentboard/SKILL.md "$HOME/.claude/skills/agentboard/SKILL.md"
+```
+
+Run these commands from the agentboard source directory. After updates to the
+skill, copy it again to refresh the personal copies. You can invoke it as
+`$agentboard` in Codex or `/agentboard` in Claude Code.
+
 ### Tools
 
 | Tool          | Arguments                              | What it does                                         |
