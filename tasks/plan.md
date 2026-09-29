@@ -42,10 +42,14 @@ CREATE INDEX idx_tasks_repo_status ON tasks(repo, status);
 
 ### Repo kimliği
 
-- Anahtar: `git rev-parse --path-format=absolute --git-common-dir` çıktısının parent dizini. Worktree'ler ana repo ile aynı anahtarı üretir, yani aynı listeyi paylaşır.
+- Anahtar `git rev-parse --path-format=absolute --git-common-dir` çıktısından türetilir. Normal repoda common dir `.git` olduğu için anahtar onun parent dizinidir; worktree'ler ana repo ile aynı anahtarı üretir, yani aynı listeyi paylaşır. Submodule ve bare repoda common dir `.git` adında değildir (ör. `super/.git/modules/a`); anahtar common dir'in kendisidir. Her zaman parent alınsaydı aynı superproject'teki iki submodule `super/.git/modules` anahtarında birleşirdi (Görev 3'te testle yakalandı).
+- `git` bulunamazsa `Resolve` hata döner. Sessizce dizin yoluna düşmek, aynı repoyu alt dizinlere göre birden çok board'a bölerdi.
 - Dizin bir git reposu değilse anahtar, dizinin mutlak yoludur.
 - Her iki durumda da `filepath.EvalSymlinks` uygulanır (macOS'ta `/var` ve `/private/var` aynı anahtarı üretmeli).
-- Hangi dizinden çözüleceği: `--repo <dir>` flag'i; verilmezse process'in `cwd`'si. MCP server bunu başlangıçta bir kez çözer ve stderr'e yazar.
+- **Hangi dizinden çözüleceği:**
+  - **MCP:** Agent her tool çağrısında kendi çalışma dizinini zorunlu `cwd` parametresiyle gönderir; server anahtarı her çağrıda bu dizinden çözer. Server process'inin kendi `cwd`'si kullanılmaz. Böylece client server'ı hangi dizinde başlatırsa başlatsın doğru repo bulunur, oturum içinde başka bir repoda çalışan agent doğru listeye yazar ve tek bir server birden çok repoya hizmet eder.
+  - **CLI:** `--repo <dir>` flag'i; verilmezse process'in `cwd`'si.
+- `cwd` mutlak yol olmalı ve var olan bir dizini göstermeli; aksi halde tool hatası döner. Alt dizin veya worktree yolu gönderilmesi sorun değildir, `Resolve` hepsini aynı repo anahtarına indirger.
 - Git için `exec git` kullanılır; go-git bağımlılığı eklenmez.
 - Bilinen bedel: repo taşınır veya yeniden clone edilirse eski liste yeni path ile eşleşmez.
 
@@ -63,6 +67,8 @@ Durumlar arası geçiş serbesttir (`done` durumundan geri açmak dahil). Sadece
 ### MCP arayüzü
 
 SDK: `github.com/modelcontextprotocol/go-sdk` (resmi SDK, typed `mcp.AddTool`). Taşıma: stdio.
+
+Her tool ayrıca zorunlu `cwd` parametresi alır (agent'ın çalışma dizininin mutlak yolu). Tabloda tekrarlanmamıştır.
 
 | Tool | Parametreler | Davranış |
 |---|---|---|
@@ -146,7 +152,7 @@ cmd/agentboard/main.go      cli.Execute() çağırır
 internal/task/              Task, Status, ParseStatus, ActiveStatuses, Patch, başlık doğrulama, String(), domain hataları
 internal/store/             SQLite: Open, migrate, Add, List, Update, Delete, Repos (schema SQL embed)
 internal/repo/              Resolve(dir): repo anahtarı
-internal/mcpserver/         New(store, repo) *mcp.Server; tool kaydı ve ince handler'lar
+internal/mcpserver/         New(store) *mcp.Server; tool kaydı ve ince handler'lar; repo her çağrıda `cwd`'den çözülür
 internal/httpapi/           New(store, ui fs.FS) http.Handler; API, statik dosyalar, güvenlik middleware'i
 internal/cli/               cobra komutları; store ve repo'yu kurup komutlara verir
 web/                        Vite projesi (src/, index.html, vite.config.ts) ve embed.go
@@ -197,9 +203,8 @@ Faz 3 ve Faz 4 yalnızca Faz 2'ye bağlıdır; paralel yürütülebilir. Yüksek
 | İki agent, ya da bir agent ve board, aynı görevi aynı anda taşır | Orta | `task_move` ve `PATCH` içinde opsiyonel `from` ile compare-and-swap |
 | Global ID ile başka reponun görevine erişim | Orta | Tüm okuma ve yazma sorguları `repo` ile filtrelenir. Görev 5, 8 ve 9'da test edilir |
 | `web/dist` eksikken `go build` veya `go test` kırılır | Orta | Commit edilmiş `web/dist/.gitkeep` ve `all:dist` embed pattern'i. UI build edilmemişse bilgilendirici sayfa |
-| MCP server proje dizininden farklı bir `cwd` ile başlatılır | Orta | `--repo` flag'i. Çözülen repo başlangıçta stderr'e yazılır |
+| Agent yanlış, göreli veya var olmayan bir `cwd` gönderir | Orta | Tool açıklaması mutlak çalışma dizinini ister. Göreli veya var olmayan yol tool hatası döner. Alt dizin ve worktree yolları `Resolve` ile aynı repoya indirgenir |
 | Release binary'si UI'siz yayınlanır | Orta | goreleaser `before.hooks` UI'yi build eder. Görev 14'te snapshot binary'nin board'u sunduğu kontrol edilir |
-| Agent oturumda başka bir repoda çalışır (`cd` MCP server'ın `cwd`'sini değiştirmez) | Düşük | MVP'de kabul edilir. Gerekirse tool'lara opsiyonel `repo` parametresi eklenir |
 | Repo taşınınca liste kopar | Düşük | Kabul edilir, README'de belgelenir |
 | `done` görevleri birikir | Düşük | `task_list` varsayılan olarak `done` göstermez. Board'da `done` sütunu uzarsa ileride limit eklenir |
 

@@ -55,12 +55,13 @@ Her görev için ortak bitiş koşulu: `gofmt -l .` boş çıktı verir, `go vet
 **Açıklama:** `repo.Resolve(dir)` fonksiyonunu yazar. Git reposunda anahtar, `git rev-parse --path-format=absolute --git-common-dir` çıktısının parent dizinidir. Git reposu değilse dizinin mutlak yoludur. İki dalda da `filepath.EvalSymlinks` uygulanır (macOS'ta `/var` ile `/private/var` aynı anahtarı üretmeli).
 
 **Kabul kriterleri:**
-- [ ] Repo kökü ve bir alt dizini aynı anahtarı döner.
-- [ ] `git worktree add` ile oluşturulan worktree ana repo ile aynı anahtarı döner.
-- [ ] Git olmayan dizin, symlink'leri çözülmüş mutlak yolunu döner.
+- [x] Repo kökü ve bir alt dizini aynı anahtarı döner.
+- [x] `git worktree add` ile oluşturulan worktree ana repo ile aynı anahtarı döner.
+- [x] Git olmayan dizin, symlink'leri çözülmüş mutlak yolunu döner.
+- [x] Aynı superproject'teki iki submodule farklı anahtar döner; göreli, var olmayan veya dizin olmayan yol hata verir.
 
 **Doğrulama:**
-- [ ] `go test ./internal/repo/...` (testler `t.TempDir()` içinde `git init` ve `git commit --allow-empty` çalıştırır; git kullanıcı bilgisi env ile verilir)
+- [x] `go test ./internal/repo/...` (testler `t.TempDir()` içinde `git init` ve `git commit --allow-empty` çalıştırır; git kullanıcı bilgisi env ile verilir)
 
 **Bağımlılıklar:** Görev 1
 
@@ -71,8 +72,8 @@ Her görev için ortak bitiş koşulu: `gofmt -l .` boş çıktı verir, `go vet
 **Kapsam:** S
 
 ### Kontrol noktası: Temel
-- [ ] Tüm testler `-race` ile geçer.
-- [ ] Eşzamanlılık testi en az 10 kez tekrarlandığında kararlıdır (`go test -race -count=10 ./internal/store/...`).
+- [x] Tüm testler `-race` ile geçer.
+- [x] Eşzamanlılık testi en az 10 kez tekrarlandığında kararlıdır (`go test -race -count=10 ./internal/store/...`).
 - [ ] İnsan incelemesi, sonra Faz 2.
 
 ## Faz 2: CLI
@@ -148,12 +149,12 @@ Her görev için ortak bitiş koşulu: `gofmt -l .` boş çıktı verir, `go vet
 
 ### Görev 7: `serve`, `task_add` ve `task_list`
 
-**Açıklama:** `mcpserver.New(store, repo)` resmi go-sdk ile bir `*mcp.Server` kurar ve typed `mcp.AddTool` ile `task_add` ve `task_list` tool'larını kaydeder. Tool açıklamaları durumların anlamını ve ne zaman kullanılacağını içerir. `serve` komutu server'ı `mcp.StdioTransport` üzerinde çalıştırır, çözülen repoyu stderr'e yazar ve stdout'a protokol dışında hiçbir şey yazmaz. Handler hatasının tool hatasına (`IsError`) nasıl eşlendiği SDK dokümantasyonundan doğrulanır.
+**Açıklama:** `mcpserver.New(store)` resmi go-sdk ile bir `*mcp.Server` kurar ve typed `mcp.AddTool` ile `task_add` ve `task_list` tool'larını kaydeder. Her tool zorunlu `cwd` parametresi alır ve repoyu her çağrıda `repo.Resolve(cwd)` ile çözer; göreli veya var olmayan yol tool hatası döner. Tool açıklamaları durumların anlamını ve ne zaman kullanılacağını içerir. `serve` komutu server'ı `mcp.StdioTransport` üzerinde çalıştırır ve stdout'a protokol dışında hiçbir şey yazmaz. Handler hatasının tool hatasına (`IsError`) nasıl eşlendiği SDK dokümantasyonundan doğrulanır.
 
 **Kabul kriterleri:**
 - [ ] In-memory transport ile bağlanan client `ListTools` ile iki tool ve input şemalarını görür.
 - [ ] `task_add` çağrısı `#1 [backlog] ...` içeren metin döner; `task_list` varsayılan olarak `done` göstermez.
-- [ ] Geçersiz durum değeri protokol hatası değil, `IsError: true` olan bir tool sonucu döner.
+- [ ] Geçersiz durum değeri ile göreli veya var olmayan `cwd` protokol hatası değil, `IsError: true` olan bir tool sonucu döner.
 
 **Doğrulama:**
 - [ ] `go test ./internal/mcpserver/...` (`mcp.NewInMemoryTransports()` ile)
@@ -173,7 +174,7 @@ Her görev için ortak bitiş koşulu: `gofmt -l .` boş çıktı verir, `go vet
 
 **Kabul kriterleri:**
 - [ ] `from` uyuşmazlığında sonuç `IsError: true` olur ve mesaj görevin mevcut durumunu içerir.
-- [ ] Repo A için kurulmuş server, repo B'nin görevini taşıyamaz, düzenleyemez ve silemez.
+- [ ] Repo A'nın `cwd`'si ile yapılan çağrı, repo B'nin görevini taşıyamaz, düzenleyemez ve silemez; aynı server iki repoya da doğru hizmet eder.
 - [ ] `task_update` sonrası `task_list` yeni başlığı gösterir; `task_delete` sonrası görevi göstermez.
 
 **Doğrulama:**
