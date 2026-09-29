@@ -1,12 +1,17 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // run executes the root command with args and returns its combined output.
@@ -232,6 +237,76 @@ func TestBoardRejectsNonLoopbackAddr(t *testing.T) {
 		if err := checkLoopback(addr); err != nil {
 			t.Errorf("checkLoopback(%s) = %v", addr, err)
 		}
+	}
+}
+
+func TestBoardServesUntilCanceled(t *testing.T) {
+	dir := setup(t)
+	mustRun(t, "--repo", dir, "add", "# served card")
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pr, pw := io.Pipe()
+	cmd := newRootCmd("1.2.3")
+	cmd.SetOut(pw)
+	cmd.SetArgs([]string{"--repo", dir, "board", "--addr", "127.0.0.1:0"})
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.ExecuteContext(ctx)
+		pw.Close()
+	}()
+
+	line, err := bufio.NewReader(pr).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read board URL: %v", err)
+	}
+	boardURL := strings.TrimSpace(strings.TrimPrefix(line, "agentboard board:"))
+	u, err := url.Parse(boardURL)
+	if err != nil || u.Scheme != "http" || u.Query().Get("repo") != resolved {
+		t.Fatalf("printed URL %q, want http URL preselecting repo %q", boardURL, resolved)
+	}
+
+	res, err := http.Get("http://" + u.Host + "/api/tasks?" + u.RawQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || !strings.Contains(string(body), `"title":"served card"`) {
+		t.Errorf("GET tasks = %d %s", res.StatusCode, body)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("board returned %v after cancel, want nil", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("board did not stop after its context was canceled")
+	}
+}
+
+func TestBoardURLWithoutResolvableRepo(t *testing.T) {
+	opts := &options{repoDir: filepath.Join(t.TempDir(), "missing")}
+	if got := boardURL("127.0.0.1:7420", opts); got != "http://127.0.0.1:7420/" {
+		t.Errorf("boardURL = %q, want the URL without a repo", got)
+	}
+}
+
+func TestDataDirDefaultsToHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(homeEnv, "")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
+	dir := newDir(t)
+	mustRun(t, "--repo", dir, "add", "stored in home")
+	if _, err := os.Stat(filepath.Join(home, ".agentboard", "agentboard.db")); err != nil {
+		t.Errorf("database not in ~/.agentboard: %v", err)
 	}
 }
 
