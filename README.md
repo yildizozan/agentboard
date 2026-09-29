@@ -92,13 +92,31 @@ Claude Code.
 
 ### Tools
 
-| Tool          | Arguments                              | What it does                                         |
-|---------------|----------------------------------------|------------------------------------------------------|
-| `task_add`    | `cwd`, `title`, `description?`, `status?` | Add a task (default `backlog`)                     |
-| `task_list`   | `cwd`, `status?`                       | List tasks; without `status`, `done` is left out     |
-| `task_move`   | `cwd`, `id`, `status`, `from?`         | Move a task; with `from` it fails if the task moved  |
-| `task_update` | `cwd`, `id`, `title?`, `description?`  | Change title or description                          |
-| `task_delete` | `cwd`, `id`                            | Delete a task permanently                            |
+| Tool          | Arguments                      | What it does                                          |
+|---------------|--------------------------------|-------------------------------------------------------|
+| `task_add`    | `cwd`, `body`, `status?`       | Add a task (default `backlog`)                        |
+| `task_list`   | `cwd`, `status?`               | List title lines; without `status`, `done` is left out |
+| `task_get`    | `cwd`, `id`                    | Show a task's status line and full Markdown body      |
+| `task_move`   | `cwd`, `id`, `status`, `from?` | Move a task; with `from` it fails if the task moved   |
+| `task_update` | `cwd`, `id`, `body`            | Replace a task's body                                 |
+| `task_delete` | `cwd`, `id`                    | Delete a task permanently                             |
+
+### Cards
+
+A card is one Markdown body. Its first line is the title as a level-1 heading
+(`# Fix login bug`); a plain first line becomes that heading, and a first line
+starting with `##` is rejected. `task_list`, `agentboard ls` and the board
+columns show only the title; the board opens the rendered body on click.
+
+```markdown
+# Fix login bug
+
+## Context
+Token expiry uses `<` instead of `<=`.
+
+## Acceptance
+- [ ] Expired token is rejected
+```
 
 ### Agent instructions
 
@@ -116,8 +134,10 @@ directory as an absolute path in `cwd`.
   `from`: its current status). If the call fails, another agent took it;
   pick another task.
 - Record work you discover with `task_add`: `todo` for planned next steps,
-  `backlog` for ideas and later work.
-- Put findings or a narrowed scope into the task with `task_update`.
+  `backlog` for ideas and later work. The `body` is Markdown whose first
+  line is the `# <title>` heading.
+- Read a task with `task_get`; put findings or a narrowed scope into its body
+  with `task_update`, which replaces the whole body.
 - When a task is finished, move it to `done`.
 - Use this board for work that other agents or later sessions should see.
 ```
@@ -127,10 +147,11 @@ directory as an absolute path in `cwd`.
 The CLI works on the board of the current directory, or of `--repo <dir>`.
 
 ```text
-agentboard add <title> [-d description] [-s status]
+agentboard add <body|-> [-s status]
 agentboard ls [-s status]
+agentboard show <id>
 agentboard mv <id> <status> [--from status]
-agentboard edit <id> [-t title] [-d description]
+agentboard edit <id> <body|->
 agentboard rm <id>
 agentboard serve
 agentboard install [--scope user|project]
@@ -146,7 +167,8 @@ agentboard board
 
 It prints a URL such as `http://127.0.0.1:7420/?repo=...` with the current
 repository preselected. Pick any board from the selector, drag cards between
-columns, and add, edit or delete tasks. The page refreshes every two seconds,
+columns, and add or delete tasks. Click a card title to read its rendered
+Markdown body and edit it (Cmd/Ctrl+Enter saves, Esc leaves the editor). The page refreshes every two seconds,
 so work done by agents shows up by itself. If an agent moved a card after the
 page last refreshed, dropping that card is refused and the board reloads
 instead of overwriting the agent's change.
