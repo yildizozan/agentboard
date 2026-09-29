@@ -29,18 +29,15 @@ const dsnParams = "?_pragma=busy_timeout(5000)&_txlock=immediate"
 // lockWait bounds how long Open retries steps that SQLite does not cover with busy_timeout.
 const lockWait = 5 * time.Second
 
-//go:embed schema_v1.sql
-var schemaV1 string
-
-// migrations[i] upgrades the schema from user_version i to i+1.
-var migrations = []string{schemaV1}
+//go:embed schema.sql
+var schema string
 
 // Store is a handle to the task database.
 type Store struct {
 	db *sql.DB
 }
 
-// Open creates the parent directory if needed, opens the database and applies pending migrations.
+// Open creates the parent directory if needed, opens the database and creates the schema.
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
@@ -58,9 +55,9 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if err := s.migrate(ctx); err != nil {
+	if _, err := db.ExecContext(ctx, schema); err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("create schema: %w", err)
 	}
 	return s, nil
 }
@@ -91,32 +88,6 @@ func (s *Store) enableWAL(ctx context.Context) error {
 func isBusy(err error) bool {
 	var sqlErr *sqlite.Error
 	return errors.As(err, &sqlErr) && sqlErr.Code()&0xff == sqlite3.SQLITE_BUSY
-}
-
-func (s *Store) migrate(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin migration: %w", err)
-	}
-	defer tx.Rollback()
-
-	var version int
-	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return fmt.Errorf("read schema version: %w", err)
-	}
-	if version > len(migrations) {
-		return fmt.Errorf("database schema version %d is newer than this binary supports (%d)", version, len(migrations))
-	}
-	for v := version; v < len(migrations); v++ {
-		if _, err := tx.ExecContext(ctx, migrations[v]); err != nil {
-			return fmt.Errorf("migrate to version %d: %w", v+1, err)
-		}
-	}
-	// PRAGMA does not accept bind parameters; the value is an int we control.
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
-		return fmt.Errorf("write schema version: %w", err)
-	}
-	return tx.Commit()
 }
 
 // Add validates and inserts a new task with a Markdown body into repo.

@@ -16,7 +16,7 @@ Tek binary, CGO yok. Aynı cobra uygulaması `serve` (MCP stdio), `board` (yerel
 - **DSN pragmaları:** `_pragma=busy_timeout(5000)&_txlock=immediate`. `immediate` yazma transaction'larının başta kilit almasını sağlar; okuma-kontrol-yazma adımlarında deadlock ve `SQLITE_BUSY` yükseltme hatası olmaz.
 - **WAL DSN'de değil:** `journal_mode` değişikliği `busy_timeout`'u dikkate almıyor; başka bir bağlantı kilit tutarken hemen `SQLITE_BUSY` dönüyor (Görev 2'de ölçüldü). WAL dosyada kalıcı olduğu için `Open` içinde bir kez, `SQLITE_BUSY` hatasında 5 saniyeye kadar yeniden denenerek açılır.
 - **Process başına tek bağlantı:** `db.SetMaxOpenConns(1)`. Process içindeki yazmalar `database/sql` havuzunda sıraya girer; SQLite kilidi için sadece process'ler yarışır. Aksi halde 100 eşzamanlı yazmada ara sıra `SQLITE_BUSY` görüldü.
-- **Migration:** `PRAGMA user_version` ve `embed` edilmiş SQL dosyaları. Migration kütüphanesi kullanılmaz.
+- **Şema:** `embed` edilmiş tek `schema.sql`, her `Open`'da `CREATE ... IF NOT EXISTS` ile uygulanır. Proje geliştirme aşamasında olduğu için migration yok; şema değişince yerel DB silinir.
 
 ### Veri modeli
 
@@ -154,7 +154,7 @@ Global flag: `--repo <dir>`. Env: `AGENTBOARD_HOME`.
 ```
 cmd/agentboard/main.go      cli.Execute() çağırır
 internal/task/              Task, Status, ParseStatus, ActiveStatuses, Patch, başlık doğrulama, String(), domain hataları
-internal/store/             SQLite: Open, migrate, Add, List, Update, Delete, Repos (schema SQL embed)
+internal/store/             SQLite: Open, Add, Get, List, Update, Delete, Repos (schema SQL embed)
 internal/repo/              Resolve(dir): repo anahtarı
 internal/mcpserver/         New(store) *mcp.Server; tool kaydı ve ince handler'lar; repo her çağrıda `cwd`'den çözülür
 internal/httpapi/           New(store, ui fs.FS) http.Handler; API, statik dosyalar, güvenlik middleware'i

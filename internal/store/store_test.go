@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
@@ -32,16 +31,7 @@ func mustAdd(t *testing.T, s *Store, repo, body string, status task.Status) task
 	return tk
 }
 
-func userVersion(t *testing.T, s *Store) int {
-	t.Helper()
-	var v int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
-		t.Fatalf("user_version: %v", err)
-	}
-	return v
-}
-
-func TestOpenMigratesOnce(t *testing.T) {
+func TestReopenKeepsTasks(t *testing.T) {
 	s, path := openTemp(t)
 	mustAdd(t, s, "/r", "keep me", task.Todo)
 	s.Close()
@@ -51,9 +41,6 @@ func TestOpenMigratesOnce(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer s2.Close()
-	if v := userVersion(t, s2); v != len(migrations) {
-		t.Errorf("user_version = %d, want %d", v, len(migrations))
-	}
 	got, err := s2.List(context.Background(), "/r", nil)
 	if err != nil || len(got) != 1 {
 		t.Fatalf("List after reopen = %v, %v; want 1 task", got, err)
@@ -335,22 +322,6 @@ func TestRepos(t *testing.T) {
 	want := []RepoSummary{{Path: "/a", Count: 2}, {Path: "/b", Count: 1}}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("Repos = %v, want %v", got, want)
-	}
-}
-
-func TestOpenRejectsNewerSchema(t *testing.T) {
-	s, path := openTemp(t)
-	mustAdd(t, s, "/r", "written by a newer binary", task.Todo)
-	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version = %d", len(migrations)+1)); err != nil {
-		t.Fatal(err)
-	}
-	s.Close()
-
-	if s2, err := Open(path); err == nil {
-		s2.Close()
-		t.Fatal("Open accepted a schema newer than this binary")
-	} else if !strings.Contains(err.Error(), "newer") {
-		t.Errorf("error = %v, want it to say the schema is newer", err)
 	}
 }
 
