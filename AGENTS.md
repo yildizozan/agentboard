@@ -18,5 +18,5 @@
 - Go 1.27 (`cmd/`, `internal/`) ve Vite + TypeScript board (`web/`). Plan ve görevler: `tasks/plan.md`, `tasks/todo.md`.
 - Domain kuralları (durumlar, doğrulama, hatalar) yalnızca `internal/task` içinde; CLI, MCP ve HTTP katmanları kalıcılık için yalnızca `internal/store`'u çağırır.
 - MCP server'da stdout protokole aittir; tanı çıktısı stderr'e gider.
-- Doğrulama: `gofmt -l .` boş, `go vet ./...`, `go test -race ./...`; frontend değişikliğinde `npm --prefix web run build`.
+- Doğrulama: `gofmt -l .` boş, `go vet ./...`, `go test -race ./...`; frontend değişikliğinde `npm --prefix web test` ve `npm --prefix web run build`.
 - Release: `v*` tag'i GoReleaser ile GitHub Release üretir; yerel deneme `goreleaser release --snapshot --clean`.
