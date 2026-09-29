@@ -1,0 +1,7 @@
+# Build output
+/agentboard
+/dist/
+
+# Local tooling
+.DS_Store
+.claude/settings.local.json
