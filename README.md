@@ -170,8 +170,8 @@ agentboard --version
 agentboard board
 ```
 
-It prints a URL such as `http://127.0.0.1:7420/?repo=...` with the current
-repository preselected. Pick any board from the selector, drag cards between
+It prints the board URL of the current repository: the repository path is the
+page path, such as `http://127.0.0.1:7420/Users/me/project`. Pick any board from the selector, drag cards between
 columns, and add or delete tasks. Click a card title to read its rendered
 Markdown body and edit it (Cmd/Ctrl+Enter saves, Esc leaves the editor). The page refreshes every two seconds,
 so work done by agents shows up by itself. If an agent moved a card after the

@@ -103,7 +103,7 @@ Global flag: `--repo <dir>`. Env: `AGENTBOARD_HOME`.
 
 ### Board (web arayüzü)
 
-**Komut:** `agentboard board` yerel bir HTTP server açar ve URL'yi yazar: `http://127.0.0.1:7420/?repo=<çözülen repo>`. Varsayılan adres `127.0.0.1:7420`; `--addr` ile değişir. Loopback olmayan bir adres verilirse komut hata ile çıkar.
+**Komut:** `agentboard board` yerel bir HTTP server açar ve URL'yi yazar: `http://127.0.0.1:7420<çözülen repo yolu>`, örneğin `http://127.0.0.1:7420/Users/me/project`. Varsayılan adres `127.0.0.1:7420`; `--addr` ile değişir. Loopback olmayan bir adres verilirse komut hata ile çıkar.
 
 **HTTP API** (`internal/httpapi`, standart `net/http.ServeMux` pattern'leri; router kütüphanesi yok):
 
@@ -126,7 +126,7 @@ Global flag: `--repo <dir>`. Env: `AGENTBOARD_HOME`.
 
 **Frontend:**
 - Vite ve vanilla TypeScript (`npm create vite@latest web -- --template vanilla-ts`). Framework yok (YAGNI); state yönetimi büyürse Preact veya Svelte değerlendirilir.
-- Üstte repo seçici. Seçim URL'deki `?repo=` parametresinde tutulur (`history.replaceState`); parametre yoksa ilk repo seçilir.
+- Üstte repo seçici. Seçim sayfa yolunda tutulur: yol repo yolunun kendisidir (`/Users/me/project`, `history.replaceState`). `/api/` ve `/assets/` dışındaki her yol `index.html` döner; yol `/` ise ilk repo seçilir.
 - 4 sütun ve sütun başlığında görev sayısı. Kartta `#id`, başlık ve açıklamanın ilk satırı.
 - Native HTML5 drag-and-drop ile taşıma. İstekte `from` = kartın alındığı sütun. `409` gelirse kullanıcıya kısa bir mesaj gösterilir ve liste yenilenir; agent'ın yaptığı değişikliğin üstüne sessizce yazılmaz.
 - Görev ekleme formu (başlık, açıklama; varsayılan durum `backlog`), karta tıklayınca başlık ve açıklama düzenleme, onaylı silme.

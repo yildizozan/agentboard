@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -74,11 +75,19 @@ func checkLoopback(addr string) error {
 	return fmt.Errorf("--addr %q is not a loopback address; the board has no authentication", addr)
 }
 
-// boardURL preselects the current repository when it can be resolved.
+// boardURL opens the board of the current repository when it can be resolved.
 func boardURL(addr string, opts *options) string {
-	u := "http://" + addr + "/"
-	if repoKey, err := opts.resolveRepo(); err == nil {
-		u += "?repo=" + url.QueryEscape(repoKey)
+	repoKey, err := opts.resolveRepo()
+	if err != nil {
+		return "http://" + addr + "/"
 	}
-	return u
+	return "http://" + addr + boardPath(repoKey)
+}
+
+// boardPath is the web UI path of a board: the repo path itself, escaped where needed.
+func boardPath(repoKey string) string {
+	if !strings.HasPrefix(repoKey, "/") {
+		repoKey = "/" + repoKey // Windows keys such as C:\src\app
+	}
+	return (&url.URL{Path: repoKey}).EscapedPath()
 }

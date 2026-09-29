@@ -2,13 +2,14 @@ import './style.css'
 import { api, ApiError, type Board, type Repo, type Status, type Task } from './api'
 import { openEditor } from './editor'
 import { renderMarkdown } from './markdown'
+import { boardPath, repoFromPath } from './route'
 
 const POLL_MS = 2000
 const TOAST_MS = 4000
 
 const state = {
   repos: [] as Repo[],
-  repo: new URLSearchParams(location.search).get('repo') ?? '',
+  repo: repoFromPath(location.pathname),
   board: null as Board | null,
   dragging: null as { id: number; from: Status } | null,
   openId: null as number | null, // task shown in the detail dialog
@@ -88,9 +89,7 @@ async function refresh() {
 function setRepo(path: string) {
   state.repo = path
   closeDetail()
-  const url = new URL(location.href)
-  url.searchParams.set('repo', path)
-  history.replaceState(null, '', url)
+  history.replaceState(null, '', boardPath(path))
 }
 
 function render() {

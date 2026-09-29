@@ -266,11 +266,11 @@ func TestBoardServesUntilCanceled(t *testing.T) {
 	}
 	boardURL := strings.TrimSpace(strings.TrimPrefix(line, "agentboard board:"))
 	u, err := url.Parse(boardURL)
-	if err != nil || u.Scheme != "http" || u.Query().Get("repo") != resolved {
-		t.Fatalf("printed URL %q, want http URL preselecting repo %q", boardURL, resolved)
+	if err != nil || boardURL != "http://"+u.Host+resolved {
+		t.Fatalf("printed URL %q, want http://<addr>%s", boardURL, resolved)
 	}
 
-	res, err := http.Get("http://" + u.Host + "/api/tasks?" + u.RawQuery)
+	res, err := http.Get("http://" + u.Host + "/api/tasks?repo=" + url.QueryEscape(resolved))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,6 +288,18 @@ func TestBoardServesUntilCanceled(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("board did not stop after its context was canceled")
+	}
+}
+
+func TestBoardPathShowsTheRepoPath(t *testing.T) {
+	for in, want := range map[string]string{
+		"/Users/ozan.yildiz/projects/agent-todo": "/Users/ozan.yildiz/projects/agent-todo",
+		"/work/a b#c?d%e":                        "/work/a%20b%23c%3Fd%25e",
+		`C:\Users\x`:                             "/C:%5CUsers%5Cx",
+	} {
+		if got := boardPath(in); got != want {
+			t.Errorf("boardPath(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
