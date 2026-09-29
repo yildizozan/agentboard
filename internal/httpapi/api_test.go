@@ -254,3 +254,28 @@ func TestInternalErrorHidesDetails(t *testing.T) {
 		t.Errorf("error = %q, want the generic message", got.Error)
 	}
 }
+
+func TestServesIndexForBoardPaths(t *testing.T) {
+	e := newEnv(t, fstest.MapFS{
+		"index.html":    {Data: []byte("<h1>board</h1>")},
+		"assets/app.js": {Data: []byte("console.log(1)")},
+	})
+	for _, path := range []string{"/", "/Users/ozan.yildiz/projects/agent-todo", "/work/a%20b"} {
+		rec := e.do(t, "GET", path, "")
+		expectStatus(t, rec, 200)
+		if rec.Body.String() != "<h1>board</h1>" {
+			t.Errorf("GET %s = %q, want index.html", path, rec.Body.String())
+		}
+	}
+	rec := e.do(t, "GET", "/assets/app.js", "")
+	expectStatus(t, rec, 200)
+	if rec.Body.String() != "console.log(1)" {
+		t.Errorf("asset body = %q", rec.Body.String())
+	}
+	// Missing assets and API routes must not turn into the HTML page.
+	for _, path := range []string{"/assets/missing.js", "/api/nope"} {
+		if rec := e.do(t, "GET", path, ""); rec.Code != 404 {
+			t.Errorf("GET %s = %d %q, want 404", path, rec.Code, rec.Body.String())
+		}
+	}
+}

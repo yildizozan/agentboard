@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -58,20 +59,38 @@ func New(s *store.Store, ui fs.FS) http.Handler {
 	mux.HandleFunc("POST /api/tasks", a.createTask)
 	mux.HandleFunc("PATCH /api/tasks/{id}", a.patchTask)
 	mux.HandleFunc("DELETE /api/tasks/{id}", a.deleteTask)
+	mux.HandleFunc("GET /api/", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusNotFound, errorJSON{Error: "not found"})
+	})
 	mux.Handle("GET /", uiHandler(ui))
 	return guard(mux)
 }
 
+// uiHandler serves the built files. Any other path is a board path such as
+// /Users/me/project, so it gets index.html and the UI reads the repo from the path.
 func uiHandler(ui fs.FS) http.Handler {
 	if ui != nil {
 		if _, err := fs.Stat(ui, "index.html"); err == nil {
-			return http.FileServerFS(ui)
+			files := http.FileServerFS(ui)
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+				if name == "" || strings.HasPrefix(name, "assets/") || isFile(ui, name) {
+					files.ServeHTTP(w, r)
+					return
+				}
+				http.ServeFileFS(w, r, ui, "index.html")
+			})
 		}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, placeholder)
 	})
+}
+
+func isFile(fsys fs.FS, name string) bool {
+	info, err := fs.Stat(fsys, name)
+	return err == nil && !info.IsDir()
 }
 
 // guard protects the loopback server from other sites open in the browser.
