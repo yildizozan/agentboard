@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -367,5 +368,43 @@ func TestRepos(t *testing.T) {
 	want := []RepoSummary{{Path: "/a", Count: 2}, {Path: "/b", Count: 1}}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("Repos = %v, want %v", got, want)
+	}
+}
+
+func TestOpenRejectsNewerSchema(t *testing.T) {
+	s, path := openTemp(t)
+	mustAdd(t, s, "/r", "written by a newer binary", task.Todo)
+	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version = %d", len(migrations)+1)); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	if s2, err := Open(path); err == nil {
+		s2.Close()
+		t.Fatal("Open accepted a schema newer than this binary")
+	} else if !strings.Contains(err.Error(), "newer") {
+		t.Errorf("error = %v, want it to say the schema is newer", err)
+	}
+}
+
+func TestUpdateBumpsUpdatedAt(t *testing.T) {
+	s, _ := openTemp(t)
+	tk := mustAdd(t, s, "/r", "x", task.Todo)
+	if _, err := s.db.Exec(`UPDATE tasks SET created_at = 1, updated_at = 1 WHERE id = ?`, tk.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Update(context.Background(), "/r", tk.ID, task.Patch{Status: ptr(task.Doing)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.Get(context.Background(), "/r", tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []task.Task{got, stored} {
+		if x.UpdatedAt.Unix() <= 1 || x.CreatedAt.Unix() != 1 {
+			t.Errorf("timestamps after update: created %d, updated %d; want created 1 and updated now",
+				x.CreatedAt.Unix(), x.UpdatedAt.Unix())
+		}
 	}
 }
