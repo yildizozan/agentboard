@@ -172,3 +172,17 @@ func TestMvIsRepoScoped(t *testing.T) {
 		t.Errorf("cross-repo mv error = %v, want not found", err)
 	}
 }
+
+func TestBoardRejectsNonLoopbackAddr(t *testing.T) {
+	setup(t)
+	for _, addr := range []string{"0.0.0.0:7420", ":7420", "192.168.1.10:7420", "example.com:80", "nonsense"} {
+		if _, err := run(t, "board", "--addr", addr); err == nil {
+			t.Errorf("board --addr %s started", addr)
+		}
+	}
+	for _, addr := range []string{"127.0.0.1:0", "localhost:0", "[::1]:0"} {
+		if err := checkLoopback(addr); err != nil {
+			t.Errorf("checkLoopback(%s) = %v", addr, err)
+		}
+	}
+}

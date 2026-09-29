@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='1' y='2' width='3' height='12' rx='1' fill='%235b6cff'/><rect x='6.5' y='2' width='3' height='8' rx='1' fill='%235b6cff'/><rect x='12' y='2' width='3' height='5' rx='1' fill='%235b6cff'/></svg>" />
+    <title>agentboard</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>agentboard</h1>
+      <label class="repo-picker">
+        <span>Board</span>
+        <select id="repo" aria-label="Board"></select>
+      </label>
+      <form id="add-form" class="add-form" autocomplete="off">
+        <input id="new-title" name="title" placeholder="New task title" aria-label="New task title" required />
+        <input id="new-desc" name="description" placeholder="Description (optional)" aria-label="Description" />
+        <button type="submit">Add to backlog</button>
+      </form>
+    </header>
+    <main>
+      <p id="empty" class="empty" hidden></p>
+      <div id="columns" class="columns"></div>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

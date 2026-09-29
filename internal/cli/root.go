@@ -34,7 +34,7 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 	cmd.PersistentFlags().StringVar(&opts.repoDir, "repo", "", "directory used to resolve the repository (default: current directory)")
-	cmd.AddCommand(newAddCmd(&opts), newLsCmd(&opts), newMvCmd(&opts), newEditCmd(&opts), newRmCmd(&opts), newServeCmd())
+	cmd.AddCommand(newAddCmd(&opts), newLsCmd(&opts), newMvCmd(&opts), newEditCmd(&opts), newRmCmd(&opts), newServeCmd(), newBoardCmd(&opts))
 	return cmd
 }
 

@@ -318,3 +318,18 @@ func TestDeleteDoesNotReuseIDs(t *testing.T) {
 		t.Errorf("id %d reused after deleting %d", next.ID, last.ID)
 	}
 }
+
+func TestRepos(t *testing.T) {
+	s, _ := openTemp(t)
+	mustAdd(t, s, "/b", "one", task.Todo)
+	mustAdd(t, s, "/a", "one", task.Todo)
+	mustAdd(t, s, "/a", "two", task.Done)
+	got, err := s.Repos(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []RepoSummary{{Path: "/a", Count: 2}, {Path: "/b", Count: 1}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("Repos = %v, want %v", got, want)
+	}
+}

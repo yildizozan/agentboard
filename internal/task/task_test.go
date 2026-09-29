@@ -110,3 +110,17 @@ func TestPatchValidateRejects(t *testing.T) {
 		}
 	}
 }
+
+func TestValidationErrorsMatchErrInvalid(t *testing.T) {
+	_, statusErr := ParseStatus("later")
+	_, titleErr := ValidateTitle(" ")
+	_, patchErr := Patch{}.Validate()
+	for _, err := range []error{statusErr, titleErr, patchErr, Invalidf("x")} {
+		if !errors.Is(err, ErrInvalid) {
+			t.Errorf("%v does not match ErrInvalid", err)
+		}
+	}
+	if errors.Is(ErrNotFound, ErrInvalid) {
+		t.Error("ErrNotFound must not match ErrInvalid")
+	}
+}

@@ -203,12 +203,12 @@ Faz 4 yalnızca Faz 2'ye bağlıdır; Faz 3 ile paralel yürütülebilir.
 **Açıklama:** Store'a `Repos(ctx)` metodunu ekler (`SELECT repo, COUNT(*) ... GROUP BY repo`). `internal/httpapi` paketi `plan.md`'deki beş endpoint'i standart `ServeMux` pattern'leriyle sunar. `PATCH /api/tasks/{id}` gövdesi doğrudan `task.Patch`'e eşlenir ve `store.Update`'i çağırır; taşıma ve düzenleme aynı endpoint'ten geçer. Domain hataları tek bir fonksiyonda HTTP koduna eşlenir (`404`, `409`, `400`). Güvenlik middleware'i `Host` header'ını ve yazma isteklerindeki `Content-Type: application/json` zorunluluğunu uygular. Bu görevde statik dosya sunumu yoktur.
 
 **Kabul kriterleri:**
-- [ ] `Host: evil.example` veya JSON olmayan bir `POST` isteği `403`/`415` ile reddedilir ve DB değişmez.
-- [ ] `PATCH /api/tasks/{id}` yanlış `from` ile `409` ve mevcut durumu, başka reponun görevi için `404`, sadece `title` içeren gövde için güncellenmiş görevi döner.
-- [ ] `GET /api/tasks` yanıtı `statuses` alanını `task` paketindeki sırayla içerir.
+- [x] `Host: evil.example` veya JSON olmayan bir `POST` isteği `403`/`415` ile reddedilir ve DB değişmez.
+- [x] `PATCH /api/tasks/{id}` yanlış `from` ile `409` ve mevcut durumu, başka reponun görevi için `404`, sadece `title` içeren gövde için güncellenmiş görevi döner.
+- [x] `GET /api/tasks` yanıtı `statuses` alanını `task` paketindeki sırayla içerir.
 
 **Doğrulama:**
-- [ ] `go test -race ./internal/httpapi/... ./internal/store/...` (`httptest` ile)
+- [x] `go test -race ./internal/httpapi/... ./internal/store/...` (`httptest` ile)
 
 **Bağımlılıklar:** Görev 5
 
@@ -224,13 +224,13 @@ Faz 4 yalnızca Faz 2'ye bağlıdır; Faz 3 ile paralel yürütülebilir.
 **Açıklama:** `web/embed.go` (paket `web`) `//go:embed all:dist` ile UI dosyalarını `fs.FS` olarak sunar; `web/dist/.gitkeep` commit edilir. `httpapi.New` UI dosyalarını `fs.FS` olarak alır ve `/api` dışındaki istekleri bu dosyalardan sunar; `index.html` yoksa build komutunu söyleyen düz bir sayfa döner. `board` komutu `--addr` (varsayılan `127.0.0.1:7420`) alır, loopback olmayan adresi reddeder, URL'yi `?repo=` ile yazar ve `Ctrl+C` ile düzgün kapanır.
 
 **Kabul kriterleri:**
-- [ ] Node kurulu olmayan bir ortamda `go build ./...` ve `go test ./...` geçer.
-- [ ] UI build edilmemişken `/` bilgilendirici sayfa döner, `/api/repos` çalışır.
-- [ ] `agentboard board --addr 0.0.0.0:7420` hata verir ve server açılmaz.
+- [x] Node kurulu olmayan bir ortamda `go build ./...` ve `go test ./...` geçer.
+- [x] UI build edilmemişken `/` bilgilendirici sayfa döner, `/api/repos` çalışır.
+- [x] `agentboard board --addr 0.0.0.0:7420` hata verir ve server açılmaz.
 
 **Doğrulama:**
-- [ ] `go test ./internal/httpapi/... ./internal/cli/...` (UI için `fstest.MapFS` ile)
-- [ ] Manuel: `agentboard board` çalıştırılır, `curl http://127.0.0.1:7420/api/repos` yanıt verir.
+- [x] `go test ./internal/httpapi/... ./internal/cli/...` (UI için `fstest.MapFS` ile)
+- [x] Manuel: `agentboard board` çalıştırılır, `curl http://127.0.0.1:7420/api/repos` yanıt verir.
 
 **Bağımlılıklar:** Görev 4, Görev 9
 
@@ -243,16 +243,16 @@ Faz 4 yalnızca Faz 2'ye bağlıdır; Faz 3 ile paralel yürütülebilir.
 
 ### Görev 11: Vite iskeleti ve salt okunur board
 
-**Açıklama:** `npm create vite@latest web -- --template vanilla-ts` ile iskeleti kurar ve örnek dosyaları temizler. `vite.config.ts` içinde `build.outDir: 'dist'` ve `/api` için `127.0.0.1:7420` proxy'si tanımlanır. `build` script'i `tsc && vite build && touch dist/.gitkeep` olur. Board repo seçiciyi (`?repo=` ile senkron), API'den gelen `statuses` sırasıyla 4 sütunu, sütun sayılarını ve kartları (`#id`, başlık, açıklamanın ilk satırı) gösterir. 2 saniyede bir yenilenir; sekme gizliyken durur.
+**Açıklama:** `web/` zaten Go embed paketini içerdiği için iskelet dışarıda `npm create vite@latest <tmp> -- --template vanilla-ts --no-interactive` ile üretilir; `package.json`, `tsconfig.json` (ek olarak `strict`) ve `index.html` demo dosyaları olmadan buna göre yazılır. `vite.config.ts` içinde `build.outDir: 'dist'` ve `/api` için `127.0.0.1:7420` proxy'si tanımlanır. `build` script'i `tsc && vite build && touch dist/.gitkeep` olur. Board repo seçiciyi (`?repo=` ile senkron), API'den gelen `statuses` sırasıyla 4 sütunu, sütun sayılarını ve kartları (`#id`, başlık, açıklamanın ilk satırı) gösterir. 2 saniyede bir yenilenir; sekme gizliyken durur.
 
 **Kabul kriterleri:**
-- [ ] Seçicide DB'deki tüm repolar görünür; seçim değişince URL ve kartlar güncellenir, sayfa yenilenince seçim korunur.
-- [ ] CLI ile eklenen bir görev en geç 2 saniye içinde board'da görünür.
-- [ ] Frontend kodunda durum listesi sabit olarak tanımlı değildir; sütunlar API yanıtından üretilir.
+- [x] Seçicide DB'deki tüm repolar görünür; seçim değişince URL ve kartlar güncellenir, sayfa yenilenince seçim korunur.
+- [x] CLI ile eklenen bir görev en geç 2 saniye içinde board'da görünür.
+- [x] Frontend kodunda durum listesi sabit olarak tanımlı değildir; sütunlar API yanıtından üretilir.
 
 **Doğrulama:**
-- [ ] `npm --prefix web ci && npm --prefix web run build` (tip kontrolü dahil) hatasız biter ve `web/dist/.gitkeep` yerinde kalır.
-- [ ] Manuel: `go build ./cmd/agentboard && ./agentboard board` sonrası tarayıcıda board açılır.
+- [x] `npm --prefix web ci && npm --prefix web run build` (tip kontrolü dahil) hatasız biter ve `web/dist/.gitkeep` yerinde kalır.
+- [x] Manuel: `go build ./cmd/agentboard && ./agentboard board` sonrası tarayıcıda board açılır.
 
 **Bağımlılıklar:** Görev 10
 
@@ -267,13 +267,13 @@ Faz 4 yalnızca Faz 2'ye bağlıdır; Faz 3 ile paralel yürütülebilir.
 **Açıklama:** Kartlar native HTML5 drag-and-drop ile sütunlar arasında taşınır; `PATCH` isteği `from` olarak kartın alındığı sütunu gönderir. `409` veya başka bir hata kısa bir mesajla gösterilir ve liste yenilenir. Sürükleme sırasında polling durur.
 
 **Kabul kriterleri:**
-- [ ] Kart sürüklenip bırakıldığında durum DB'de değişir; `agentboard ls` yeni durumu gösterir.
-- [ ] Board açıkken CLI ile taşınmış bir kart, board'daki eski sütunundan sürüklenirse `409` mesajı görünür ve kart CLI'nin taşıdığı sütunda kalır.
-- [ ] Sürükleme sırasında polling kartın yerini değiştirmez.
+- [x] Kart sürüklenip bırakıldığında durum DB'de değişir; `agentboard ls` yeni durumu gösterir.
+- [x] Board açıkken CLI ile taşınmış bir kart, board'daki eski sütunundan sürüklenirse `409` mesajı görünür ve kart CLI'nin taşıdığı sütunda kalır.
+- [x] Sürükleme sırasında polling kartın yerini değiştirmez.
 
 **Doğrulama:**
-- [ ] `npm --prefix web run build`
-- [ ] Manuel: tarayıcıda yukarıdaki üç senaryo çalıştırılır.
+- [x] `npm --prefix web run build`
+- [x] Manuel: tarayıcıda yukarıdaki üç senaryo çalıştırılır.
 
 **Bağımlılıklar:** Görev 11
 
@@ -287,13 +287,13 @@ Faz 4 yalnızca Faz 2'ye bağlıdır; Faz 3 ile paralel yürütülebilir.
 **Açıklama:** Görev ekleme formu (başlık, açıklama; varsayılan durum `backlog`) eklenir. Karta tıklayınca başlık ve açıklama düzenlenebilir bir forma dönüşür; kaydetme `PATCH` ile yapılır. Kartta onaylı silme butonu bulunur. Düzenleme sırasında polling o kartın içeriğini ezmez.
 
 **Kabul kriterleri:**
-- [ ] Eklenen görev `backlog` sütununda görünür.
-- [ ] Düzenlenen başlık ve açıklama kaydedilir; `agentboard ls` yeni başlığı gösterir. Boş başlık kaydedilemez ve hata mesajı görünür.
-- [ ] Silme onay ister; onaydan sonra kart kaybolur, iptal edilirse kart kalır.
+- [x] Eklenen görev `backlog` sütununda görünür.
+- [x] Düzenlenen başlık ve açıklama kaydedilir; `agentboard ls` yeni başlığı gösterir. Boş başlık kaydedilemez ve hata mesajı görünür.
+- [x] Silme onay ister; onaydan sonra kart kaybolur, iptal edilirse kart kalır.
 
 **Doğrulama:**
-- [ ] `npm --prefix web run build`
-- [ ] Manuel: tarayıcıda yukarıdaki senaryolar çalıştırılır.
+- [x] `npm --prefix web run build`
+- [x] Manuel: tarayıcıda yukarıdaki senaryolar çalıştırılır.
 
 **Bağımlılıklar:** Görev 12
 

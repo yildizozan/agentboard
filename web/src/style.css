@@ -1,0 +1,264 @@
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --column: #eceef2;
+  --text: #1c1f26;
+  --muted: #6a7180;
+  --border: #d9dde4;
+  --accent: #5b6cff;
+  --accent-soft: #e5e8ff;
+  --danger: #d64545;
+  --shadow: 0 1px 2px rgb(16 24 40 / 8%);
+  color-scheme: light dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121418;
+    --surface: #1d2027;
+    --column: #181b21;
+    --text: #e6e8ec;
+    --muted: #9097a4;
+    --border: #2d313b;
+    --accent: #8390ff;
+    --accent-soft: #262b4d;
+    --danger: #ff7070;
+    --shadow: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+select,
+textarea {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 6px 12px;
+}
+
+button[type='submit'],
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  padding: 12px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.repo-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.repo-picker select {
+  color: var(--text);
+  min-width: 200px;
+}
+
+.add-form {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 280px;
+}
+
+.add-form input {
+  flex: 1;
+  min-width: 140px;
+}
+
+main {
+  padding: 16px 20px;
+}
+
+.empty {
+  color: var(--muted);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 16px;
+  align-items: start;
+  overflow-x: auto;
+}
+
+.column {
+  background: var(--column);
+  border: 2px solid transparent;
+  border-radius: 10px;
+  padding: 10px;
+  min-height: 160px;
+}
+
+.column.drop-target {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.column h2 {
+  display: flex;
+  justify-content: space-between;
+  margin: 2px 4px 10px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.count {
+  font-weight: normal;
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  box-shadow: var(--shadow);
+  cursor: grab;
+}
+
+.card.dragging {
+  opacity: 0.5;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-id {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-title {
+  display: block;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.card-title:hover {
+  color: var(--accent);
+}
+
+.card-delete {
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.card-delete:hover {
+  color: var(--danger);
+}
+
+.card-desc {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card.editing {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: default;
+  border-color: var(--accent);
+}
+
+.edit-desc {
+  resize: vertical;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(90vw, 520px);
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 20%);
+}

@@ -37,18 +37,18 @@ func ParseStatus(s string) (Status, error) {
 	for i, st := range statuses {
 		names[i] = string(st)
 	}
-	return "", fmt.Errorf("invalid status %q: must be one of %s", s, strings.Join(names, ", "))
+	return "", Invalidf("invalid status %q: must be one of %s", s, strings.Join(names, ", "))
 }
 
 // Task is one card on a repo's board.
 type Task struct {
-	ID          int64
-	Repo        string
-	Title       string
-	Description string
-	Status      Status
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID          int64     `json:"id"`
+	Repo        string    `json:"repo"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Status      Status    `json:"status"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // String returns the compact line used by the CLI and MCP output.
@@ -56,8 +56,21 @@ func (t Task) String() string {
 	return fmt.Sprintf("#%d [%s] %s", t.ID, t.Status, t.Title)
 }
 
+// ErrInvalid matches every input validation error (errors.Is), so callers can map them to one response.
+var ErrInvalid = errors.New("invalid input")
+
+type invalidError struct{ msg string }
+
+func (e invalidError) Error() string        { return e.msg }
+func (e invalidError) Is(target error) bool { return target == ErrInvalid }
+
+// Invalidf returns a validation error that matches ErrInvalid.
+func Invalidf(format string, a ...any) error {
+	return invalidError{msg: fmt.Sprintf(format, a...)}
+}
+
 // ErrEmptyTitle is returned for a blank title.
-var ErrEmptyTitle = errors.New("title must not be empty")
+var ErrEmptyTitle error = invalidError{msg: "title must not be empty"}
 
 // ValidateTitle returns the trimmed title or ErrEmptyTitle.
 func ValidateTitle(title string) (string, error) {
@@ -71,19 +84,19 @@ func ValidateTitle(title string) (string, error) {
 // Patch describes a change to a task; nil fields stay unchanged.
 // When From is set the change applies only if the task is currently in From (compare-and-swap).
 type Patch struct {
-	Title       *string
-	Description *string
-	Status      *Status
-	From        *Status
+	Title       *string `json:"title,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Status      *Status `json:"status,omitempty"`
+	From        *Status `json:"from,omitempty"`
 }
 
 // Validate checks p and returns it with the title normalized.
 func (p Patch) Validate() (Patch, error) {
 	if p.Title == nil && p.Description == nil && p.Status == nil {
-		return Patch{}, errors.New("nothing to change: set title, description or status")
+		return Patch{}, Invalidf("nothing to change: set title, description or status")
 	}
 	if p.From != nil && p.Status == nil {
-		return Patch{}, errors.New("from requires status")
+		return Patch{}, Invalidf("from requires status")
 	}
 	if p.Title != nil {
 		title, err := ValidateTitle(*p.Title)

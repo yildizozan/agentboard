@@ -122,7 +122,7 @@ func (s *Store) migrate(ctx context.Context) error {
 // Add validates and inserts a new task into repo.
 func (s *Store) Add(ctx context.Context, repo, title, description string, status task.Status) (task.Task, error) {
 	if repo == "" {
-		return task.Task{}, errors.New("repo must not be empty")
+		return task.Task{}, task.Invalidf("repo must not be empty")
 	}
 	title, err := task.ValidateTitle(title)
 	if err != nil {
@@ -253,6 +253,33 @@ func (s *Store) List(ctx context.Context, repo string, statuses []task.Status) (
 		return cmp.Compare(slices.Index(order, a.Status), slices.Index(order, b.Status))
 	})
 	return tasks, nil
+}
+
+// RepoSummary is one board and its number of tasks.
+type RepoSummary struct {
+	Path  string
+	Count int
+}
+
+// Repos returns every repo that has at least one task, ordered by path.
+func (s *Store) Repos(ctx context.Context) ([]RepoSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT repo, COUNT(*) FROM tasks GROUP BY repo ORDER BY repo`)
+	if err != nil {
+		return nil, fmt.Errorf("list repos: %w", err)
+	}
+	defer rows.Close()
+	var repos []RepoSummary
+	for rows.Next() {
+		var r RepoSummary
+		if err := rows.Scan(&r.Path, &r.Count); err != nil {
+			return nil, fmt.Errorf("scan repo: %w", err)
+		}
+		repos = append(repos, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list repos: %w", err)
+	}
+	return repos, nil
 }
 
 // taskColumns is the column list scanTask expects.

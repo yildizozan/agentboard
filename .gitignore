@@ -5,3 +5,8 @@
 # Local tooling
 .DS_Store
 .claude/settings.local.json
+
+# Frontend: only the placeholder that keeps //go:embed happy is tracked
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
