@@ -248,8 +248,14 @@ go test -race ./...
 ```
 
 ```bash
-npm --prefix web ci && npm --prefix web run build && go build .
+make build
 ```
+
+Requires Go 1.27+, Node.js with npm, and GoReleaser. This builds the web UI
+and creates a local snapshot in `dist/` with `agentboard_darwin_arm64`,
+`agentboard_linux_amd64`, `agentboard_windows_amd64.exe`, `checksums.txt`,
+and GoReleaser metadata. Each build replaces the previous `dist/` output.
+Running `make` without a target also builds this snapshot.
 
 For UI work, run `agentboard board` and `npm --prefix web run dev` side by side;
 Vite proxies `/api` to the running board.
