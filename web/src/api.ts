@@ -1,6 +1,8 @@
 // Typed client for the agentboard JSON API (internal/httpapi).
 
 export type Status = string
+export type Priority = string
+export type Kind = 'task' | 'epic'
 
 export interface Task {
   id: number
@@ -8,6 +10,9 @@ export interface Task {
   title: string // derived by the server from the body's "# " first line
   body: string // Markdown
   status: Status
+  kind: Kind
+  priority: Priority
+  epicId: number | null
   createdAt: string
   updatedAt: string
 }
@@ -21,6 +26,7 @@ export interface Repo {
 export interface Board {
   // Column order comes from the server; the UI never hard-codes statuses.
   statuses: Status[]
+  priorities: Priority[] // lowest first, from the server like the statuses
   tasks: Task[]
 }
 
@@ -28,6 +34,15 @@ export interface Patch {
   body?: string
   status?: Status
   from?: Status
+  priority?: Priority
+  epic?: number // 0 removes the epic link
+}
+
+export interface Draft {
+  body: string
+  kind?: Kind
+  priority?: Priority
+  epic?: number // 0 for none
 }
 
 export class ApiError extends Error {
@@ -64,7 +79,7 @@ const repoQuery = (repo: string) => `?repo=${encodeURIComponent(repo)}`
 export const api = {
   repos: () => request<Repo[]>('GET', '/api/repos'),
   board: (repo: string) => request<Board>('GET', `/api/tasks${repoQuery(repo)}`),
-  create: (repo: string, body: string) => request<Task>('POST', `/api/tasks${repoQuery(repo)}`, { body }),
+  create: (repo: string, draft: Draft) => request<Task>('POST', `/api/tasks${repoQuery(repo)}`, draft),
   patch: (repo: string, id: number, patch: Patch) =>
     request<Task>('PATCH', `/api/tasks/${id}${repoQuery(repo)}`, patch),
   merge: (repo: string, id: number, source: number) =>

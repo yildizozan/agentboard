@@ -1,7 +1,8 @@
 import './style.css'
 import { api, ApiError, type Board, type Repo, type Status, type Task } from './api'
 import { dropAction } from './drop'
-import { openEditor } from './editor'
+import { openEditor, type EditorFields, type EditorValues } from './editor'
+import { cardHue } from './epic'
 import { renderMarkdown } from './markdown'
 import { boardPath, repoFromPath } from './route'
 
@@ -194,8 +195,35 @@ function card(t: Task): HTMLElement {
 
   const title = button(t.title, 'card-title', () => openDetail(t.id), `Open #${t.id}: ${t.title}`)
   const del = button('×', 'card-delete', () => void removeTask(t), `Delete #${t.id}`)
-  node.append(el('div', 'card-head', el('span', 'card-id', `#${t.id}`), del), title)
+  node.append(el('div', 'card-head', el('span', 'card-id', `#${t.id}`, ...badges(t)), del), title)
+  const hue = cardHue(t)
+  if (hue) node.dataset.hue = hue
+  if (t.kind === 'epic') node.classList.add('epic')
+  const epic = epicOf(t)
+  if (epic) {
+    node.classList.add('in-epic')
+    node.append(el('span', 'card-epic', `#${epic.id} ${epic.title}`))
+  } else if (t.epicId !== null) {
+    node.classList.add('in-epic')
+    node.append(el('span', 'card-epic', `#${t.epicId}`))
+  }
   return node
+}
+
+// badges are the small labels after a card's id: EPIC, and a priority other than normal.
+function badges(t: Task): HTMLElement[] {
+  const out: HTMLElement[] = []
+  if (t.kind === 'epic') out.push(el('span', 'badge badge-epic', 'EPIC'))
+  if (t.priority !== 'normal') out.push(el('span', `badge badge-${t.priority}`, t.priority))
+  return out
+}
+
+function epicOf(t: Task): Task | undefined {
+  return t.epicId === null ? undefined : state.board?.tasks.find((x) => x.id === t.epicId)
+}
+
+function epics(): { id: number; title: string }[] {
+  return (state.board?.tasks ?? []).filter((t) => t.kind === 'epic')
 }
 
 function renderDetail() {
@@ -206,24 +234,43 @@ function renderDetail() {
     toast('The task was deleted.')
     return
   }
-  const meta = el('span', 'card-id', `#${t.id} · ${t.status}`)
+  const meta = el('span', 'card-id', `#${t.id} · ${t.status}`, ...badges(t))
   meta.id = 'detail-meta'
+  const epic = epicOf(t)
+  if (epic) meta.append(button(`#${epic.id} ${epic.title}`, 'detail-epic', () => openDetail(epic.id)))
   const head = el('div', 'detail-head', meta,
     el('div', 'edit-actions', button('Edit', '', () => editTask(t)), button('Close', '', closeDetail)))
-  ui.detail.replaceChildren(head, markdown(t.body))
+  ui.detail.replaceChildren(head, markdown(t.body), ...epicTasks(t))
+  const hue = cardHue(t)
+  if (hue) ui.detail.dataset.hue = hue
+  else delete ui.detail.dataset.hue
+  if (t.kind === 'epic') ui.detail.classList.add('epic')
+  else ui.detail.classList.remove('epic')
   if (!ui.detail.open) ui.detail.showModal()
 }
 
-// edit opens the full-screen Markdown editor; write stores its body and returns once it is saved.
-function edit(heading: string, body: string, submitLabel: string, write: (body: string) => Promise<unknown>) {
+// epicTasks lists the tasks of an epic in its detail dialog.
+function epicTasks(t: Task): HTMLElement[] {
+  if (t.kind !== 'epic') return []
+  const tasks = (state.board?.tasks ?? []).filter((x) => x.epicId === t.id)
+  const items = tasks.map((x) =>
+    el('li', '', button(`#${x.id} ${x.title}`, 'detail-epic-task', () => openDetail(x.id)), el('span', 'card-id', ` ${x.status}`)))
+  return [el('h3', 'detail-section', `Tasks in this epic (${tasks.length})`),
+    items.length ? el('ul', 'detail-epic-tasks', ...items) : el('p', 'empty', 'No tasks yet.')]
+}
+
+// edit opens the full-screen Markdown editor; write stores its values and returns once they are saved.
+function edit(heading: string, body: string, submitLabel: string, fields: EditorFields,
+  write: (values: EditorValues) => Promise<unknown>) {
   state.editing = true
   openEditor(ui.editor, {
     heading,
     body,
     submitLabel,
-    save: async (text) => {
+    fields,
+    save: async (values) => {
       try {
-        await write(text)
+        await write(values)
       } catch (err) {
         toast(errorMessage(err)) // the editor stays open, so the text is not lost
         return false
@@ -239,11 +286,17 @@ function edit(heading: string, body: string, submitLabel: string, write: (body: 
 }
 
 function addTask() {
-  edit('New task', '', 'Add to backlog', (body) => api.create(state.repo, body))
+  const fields = { kind: 'task' as const, priority: 'normal', priorities: state.board?.priorities ?? [], epic: null, epics: epics() }
+  edit('New task', '', 'Add to backlog', fields, (v) =>
+    api.create(state.repo, { body: v.body, kind: v.kind, priority: v.priority, epic: v.epic ?? 0 }))
 }
 
 function editTask(t: Task) {
-  edit(`Edit #${t.id}`, t.body, 'Save', (body) => api.patch(state.repo, t.id, { body }))
+  // An epic cannot belong to an epic, so its epic select stays empty.
+  const fields = { priority: t.priority, priorities: state.board?.priorities ?? [], epic: t.epicId,
+    epics: t.kind === 'epic' ? [] : epics().filter((e) => e.id !== t.id) }
+  edit(`Edit #${t.id}`, t.body, 'Save', fields, (v) =>
+    api.patch(state.repo, t.id, { body: v.body, priority: v.priority, epic: v.epic ?? 0 }))
 }
 
 function openDetail(id: number) {

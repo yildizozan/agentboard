@@ -175,6 +175,114 @@ main {
   opacity: 0.5;
 }
 
+/* Epic hues: each epic and its tasks share one --hue; the tones come from mixing it with the surface. */
+[data-hue='green'] { --hue: #2f9e44; }
+[data-hue='blue'] { --hue: #1c7ed6; }
+[data-hue='orange'] { --hue: #e8590c; }
+[data-hue='purple'] { --hue: #7048e8; }
+[data-hue='pink'] { --hue: #d6336c; }
+[data-hue='teal'] { --hue: #0c8599; }
+
+@media (prefers-color-scheme: dark) {
+  [data-hue='green'] { --hue: #51cf66; }
+  [data-hue='blue'] { --hue: #4dabf7; }
+  [data-hue='orange'] { --hue: #ff922b; }
+  [data-hue='purple'] { --hue: #9775fa; }
+  [data-hue='pink'] { --hue: #f06595; }
+  [data-hue='teal'] { --hue: #22b8cf; }
+}
+
+.card.epic {
+  background: color-mix(in srgb, var(--hue) 32%, var(--surface));
+  border-color: var(--hue);
+}
+
+.card.in-epic {
+  background: color-mix(in srgb, var(--hue) 10%, var(--surface));
+  border-left: 4px solid var(--hue);
+}
+
+.card-epic {
+  display: block;
+  margin-top: 4px;
+  color: var(--hue, var(--muted));
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.badge-epic {
+  background: var(--hue, var(--accent));
+  color: var(--bg); /* dark text on the light dark-mode hues, light text on the deep light-mode hues */
+}
+
+.badge-high {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+
+.badge-low {
+  background: var(--column);
+  color: var(--muted);
+}
+
+.detail[data-hue] {
+  border-top: 4px solid var(--hue);
+}
+
+.detail-epic,
+.detail-epic-task {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--hue, var(--accent));
+  text-align: left;
+}
+
+.detail-epic {
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.detail-epic:hover,
+.detail-epic-task:hover {
+  text-decoration: underline;
+}
+
+.detail-section {
+  margin: 20px 0 6px;
+  font-size: 14px;
+}
+
+.detail-epic-tasks {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.editor-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.editor-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .card.merge-target {
   border-color: var(--accent);
   outline: 2px solid var(--accent);
