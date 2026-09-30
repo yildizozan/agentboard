@@ -67,5 +67,7 @@ export const api = {
   create: (repo: string, body: string) => request<Task>('POST', `/api/tasks${repoQuery(repo)}`, { body }),
   patch: (repo: string, id: number, patch: Patch) =>
     request<Task>('PATCH', `/api/tasks/${id}${repoQuery(repo)}`, patch),
+  merge: (repo: string, id: number, source: number) =>
+    request<Task>('POST', `/api/tasks/${id}/merge${repoQuery(repo)}`, { source }),
   remove: (repo: string, id: number) => request<void>('DELETE', `/api/tasks/${id}${repoQuery(repo)}`),
 }

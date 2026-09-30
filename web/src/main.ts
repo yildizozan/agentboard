@@ -1,5 +1,6 @@
 import './style.css'
 import { api, ApiError, type Board, type Repo, type Status, type Task } from './api'
+import { dropAction } from './drop'
 import { openEditor } from './editor'
 import { renderMarkdown } from './markdown'
 import { boardPath, repoFromPath } from './route'
@@ -146,7 +147,9 @@ function column(status: Status, tasks: Task[]): HTMLElement {
     col.classList.remove('drop-target')
     const drag = state.dragging
     state.dragging = null
-    if (drag && drag.from !== status) void moveTask(drag.id, drag.from, status)
+    if (!drag) return
+    const action = dropAction(drag, { column: status })
+    if (action.kind === 'move') void moveTask(drag.id, drag.from, action.to)
   })
   return col
 }
@@ -164,6 +167,29 @@ function card(t: Task): HTMLElement {
   node.addEventListener('dragend', () => {
     state.dragging = null
     node.classList.remove('dragging')
+  })
+  // Dropping on another card merges into it; the column below does not see these events.
+  node.dataset.mergeLabel = `Merge into #${t.id}`
+  node.addEventListener('dragover', (e) => {
+    if (!state.dragging || state.dragging.id === t.id) return
+    e.preventDefault()
+    e.stopPropagation()
+    node.closest('.column')?.classList.remove('drop-target')
+    node.classList.add('merge-target')
+  })
+  node.addEventListener('dragleave', (e) => {
+    if (!node.contains(e.relatedTarget as Node | null)) node.classList.remove('merge-target')
+  })
+  node.addEventListener('drop', (e) => {
+    const drag = state.dragging
+    if (!drag) return
+    e.preventDefault()
+    e.stopPropagation()
+    node.classList.remove('merge-target')
+    node.closest('.column')?.classList.remove('drop-target')
+    state.dragging = null
+    const action = dropAction(drag, { card: t.id, column: t.status })
+    if (action.kind === 'merge') void mergeTask(drag.id, t)
   })
 
   const title = button(t.title, 'card-title', () => openDetail(t.id), `Open #${t.id}: ${t.title}`)
@@ -241,6 +267,27 @@ async function moveTask(id: number, from: Status, to: Status) {
     }
   }
   await refresh()
+}
+
+async function mergeTask(sourceId: number, target: Task) {
+  const source = state.board?.tasks.find((x) => x.id === sourceId)
+  const question = `Merge #${sourceId} "${source?.title ?? ''}" into #${target.id} "${target.title}"? ` +
+    `#${sourceId} will be deleted and its content added to #${target.id}.`
+  if (!confirm(question)) return
+  let merged: Task
+  try {
+    merged = await api.merge(state.repo, target.id, sourceId)
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      toast(`#${sourceId} is in ${err.current}; move it out of ${err.current} before merging.`)
+    } else {
+      toast(errorMessage(err))
+    }
+    await refresh()
+    return
+  }
+  await refresh()
+  editTask(merged) // tidy the combined body
 }
 
 async function removeTask(t: Task) {

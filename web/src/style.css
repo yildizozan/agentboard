@@ -175,6 +175,19 @@ main {
   opacity: 0.5;
 }
 
+.card.merge-target {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+}
+
+.card.merge-target::after {
+  content: attr(data-merge-label);
+  display: block;
+  margin-top: 4px;
+  color: var(--accent);
+  font-size: 12px;
+}
+
 .card-head {
   display: flex;
   justify-content: space-between;
