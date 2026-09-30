@@ -114,13 +114,7 @@ func (h handlers) add(ctx context.Context, _ *mcp.CallToolRequest, in addInput) 
 	if err != nil {
 		return nil, nil, err
 	}
-	status := task.Backlog
-	if in.Status != "" {
-		if status, err = task.ParseStatus(in.Status); err != nil {
-			return nil, nil, err
-		}
-	}
-	tk, err := h.store.Add(ctx, repoKey, in.Body, status)
+	tk, err := h.store.Add(ctx, repoKey, task.Draft{Body: in.Body, Status: task.Status(in.Status)})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -140,7 +134,7 @@ func (h handlers) list(ctx context.Context, _ *mcp.CallToolRequest, in listInput
 		}
 		statuses = []task.Status{st}
 	}
-	tasks, err := h.store.List(ctx, repoKey, statuses)
+	tasks, err := h.store.List(ctx, repoKey, store.Filter{Statuses: statuses})
 	if err != nil {
 		return nil, nil, err
 	}

@@ -22,9 +22,10 @@ import (
 
 // dsnParams make concurrent writers from several processes safe:
 // busy_timeout waits for locks instead of failing, and immediate transactions take
-// the write lock up front so read-then-write steps cannot deadlock.
+// the write lock up front so read-then-write steps cannot deadlock. foreign_keys makes
+// deleting an epic clear the epic_id of its tasks.
 // WAL is not set here: it persists in the file and is enabled once by enableWAL.
-const dsnParams = "?_pragma=busy_timeout(5000)&_txlock=immediate"
+const dsnParams = "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
 
 // lockWait bounds how long Open retries steps that SQLite does not cover with busy_timeout.
 const lockWait = 5 * time.Second
@@ -90,23 +91,30 @@ func isBusy(err error) bool {
 	return errors.As(err, &sqlErr) && sqlErr.Code()&0xff == sqlite3.SQLITE_BUSY
 }
 
-// Add validates and inserts a new task with a Markdown body into repo.
-func (s *Store) Add(ctx context.Context, repo, body string, status task.Status) (task.Task, error) {
+// Add validates d and inserts it into repo. An epic link must name an epic of the same repo.
+func (s *Store) Add(ctx context.Context, repo string, d task.Draft) (task.Task, error) {
 	if repo == "" {
 		return task.Task{}, task.Invalidf("repo must not be empty")
 	}
-	body, err := task.ValidateBody(body)
+	d, err := d.Validate()
 	if err != nil {
 		return task.Task{}, err
 	}
-	if _, err := task.ParseStatus(string(status)); err != nil {
-		return task.Task{}, err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return task.Task{}, fmt.Errorf("begin add: %w", err)
+	}
+	defer tx.Rollback()
+	if d.EpicID != nil {
+		if err := checkEpic(ctx, tx, repo, *d.EpicID); err != nil {
+			return task.Task{}, err
+		}
 	}
 
 	now := time.Now().Unix()
-	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO tasks (repo, body, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		repo, body, string(status), now, now)
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO tasks (repo, body, status, kind, priority, epic_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		repo, d.Body, string(d.Status), string(d.Kind), string(d.Priority), d.EpicID, now, now)
 	if err != nil {
 		return task.Task{}, fmt.Errorf("insert task: %w", err)
 	}
@@ -114,14 +122,33 @@ func (s *Store) Add(ctx context.Context, repo, body string, status task.Status) 
 	if err != nil {
 		return task.Task{}, fmt.Errorf("read task id: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return task.Task{}, fmt.Errorf("commit add: %w", err)
+	}
 	return task.Task{
 		ID:        id,
 		Repo:      repo,
-		Body:      body,
-		Status:    status,
+		Body:      d.Body,
+		Status:    d.Status,
+		Kind:      d.Kind,
+		Priority:  d.Priority,
+		EpicID:    d.EpicID,
 		CreatedAt: time.Unix(now, 0),
 		UpdatedAt: time.Unix(now, 0),
 	}, nil
+}
+
+// checkEpic returns task.ErrNotFound when epicID is not in repo, and a validation error
+// when it is not an epic.
+func checkEpic(ctx context.Context, q rowQuerier, repo string, epicID int64) error {
+	epic, err := getTask(ctx, q, repo, epicID)
+	if err != nil {
+		return err
+	}
+	if epic.Kind != task.EpicKind {
+		return task.Invalidf("#%d is not an epic", epicID)
+	}
+	return nil
 }
 
 // Update applies p to task id in repo inside one transaction.
@@ -152,11 +179,17 @@ func (s *Store) Update(ctx context.Context, repo string, id int64, p task.Patch)
 	if p.Status != nil {
 		tk.Status = *p.Status
 	}
+	if p.Priority != nil {
+		tk.Priority = *p.Priority
+	}
+	if err := linkEpic(ctx, tx, &tk, p.Epic); err != nil {
+		return task.Task{}, err
+	}
 	now := time.Now().Unix()
 	tk.UpdatedAt = time.Unix(now, 0)
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE tasks SET body = ?, status = ?, updated_at = ? WHERE id = ?`,
-		tk.Body, string(tk.Status), now, id); err != nil {
+		`UPDATE tasks SET body = ?, status = ?, priority = ?, epic_id = ?, updated_at = ? WHERE id = ?`,
+		tk.Body, string(tk.Status), string(tk.Priority), tk.EpicID, now, id); err != nil {
 		return task.Task{}, fmt.Errorf("update task: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -168,6 +201,26 @@ func (s *Store) Update(ctx context.Context, repo string, id int64, p task.Patch)
 // Get returns task id of repo or task.ErrNotFound.
 func (s *Store) Get(ctx context.Context, repo string, id int64) (task.Task, error) {
 	return getTask(ctx, s.db, repo, id)
+}
+
+// linkEpic applies an epic change to tk: nil keeps the link, 0 removes it, and any other id
+// must name an epic of tk's repo. An epic cannot be linked to another epic.
+func linkEpic(ctx context.Context, q rowQuerier, tk *task.Task, epic *int64) error {
+	if epic == nil {
+		return nil
+	}
+	if *epic == 0 {
+		tk.EpicID = nil
+		return nil
+	}
+	if tk.Kind == task.EpicKind {
+		return task.ErrNestedEpic
+	}
+	if err := checkEpic(ctx, q, tk.Repo, *epic); err != nil {
+		return err
+	}
+	tk.EpicID = epic
+	return nil
 }
 
 // Merge appends task sourceID to task targetID of repo (task.MergeBody) and deletes the
@@ -194,12 +247,19 @@ func (s *Store) Merge(ctx context.Context, repo string, targetID, sourceID int64
 	if source.Status == task.Doing {
 		return task.Task{}, &task.ConflictError{ID: sourceID, Current: source.Status}
 	}
+	if source.Kind == task.EpicKind && target.Kind != task.EpicKind {
+		return task.Task{}, task.Invalidf("cannot merge epic #%d into task #%d: merge it into an epic", sourceID, targetID)
+	}
 
 	target.Body = task.MergeBody(target, source)
 	now := time.Now().Unix()
 	target.UpdatedAt = time.Unix(now, 0)
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET body = ?, updated_at = ? WHERE id = ?`, target.Body, now, targetID); err != nil {
 		return task.Task{}, fmt.Errorf("update merge target: %w", err)
+	}
+	// The source's tasks move to the target epic before the delete would unlink them.
+	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET epic_id = ? WHERE epic_id = ?`, targetID, sourceID); err != nil {
+		return task.Task{}, fmt.Errorf("move merged epic's tasks: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, sourceID); err != nil {
 		return task.Task{}, fmt.Errorf("delete merge source: %w", err)
@@ -226,16 +286,26 @@ func (s *Store) Delete(ctx context.Context, repo string, id int64) error {
 	return nil
 }
 
-// List returns the tasks of repo whose status is in statuses (all statuses when empty),
-// ordered by board column and then by id.
-func (s *Store) List(ctx context.Context, repo string, statuses []task.Status) ([]task.Task, error) {
+// Filter narrows List. Zero values match everything.
+type Filter struct {
+	Statuses []task.Status // only these statuses
+	Epic     int64         // only tasks of this epic
+}
+
+// List returns the tasks of repo that match f, ordered by board column, then by priority
+// (high first) and then by id.
+func (s *Store) List(ctx context.Context, repo string, f Filter) ([]task.Task, error) {
 	query := `SELECT ` + taskColumns + ` FROM tasks WHERE repo = ?`
 	args := []any{repo}
-	if len(statuses) > 0 {
-		query += " AND status IN (?" + strings.Repeat(", ?", len(statuses)-1) + ")"
-		for _, st := range statuses {
+	if len(f.Statuses) > 0 {
+		query += " AND status IN (?" + strings.Repeat(", ?", len(f.Statuses)-1) + ")"
+		for _, st := range f.Statuses {
 			args = append(args, string(st))
 		}
+	}
+	if f.Epic != 0 {
+		query += " AND epic_id = ?"
+		args = append(args, f.Epic)
 	}
 	query += " ORDER BY id"
 
@@ -259,7 +329,10 @@ func (s *Store) List(ctx context.Context, repo string, statuses []task.Status) (
 
 	order := task.Statuses()
 	slices.SortStableFunc(tasks, func(a, b task.Task) int {
-		return cmp.Compare(slices.Index(order, a.Status), slices.Index(order, b.Status))
+		return cmp.Or(
+			cmp.Compare(slices.Index(order, a.Status), slices.Index(order, b.Status)),
+			cmp.Compare(a.Priority.Rank(), b.Priority.Rank()),
+		)
 	})
 	return tasks, nil
 }
@@ -292,7 +365,7 @@ func (s *Store) Repos(ctx context.Context) ([]RepoSummary, error) {
 }
 
 // taskColumns is the column list scanTask expects.
-const taskColumns = `id, repo, body, status, created_at, updated_at`
+const taskColumns = `id, repo, body, status, kind, priority, epic_id, created_at, updated_at`
 
 // scanner is satisfied by *sql.Row and *sql.Rows.
 type scanner interface {
@@ -314,14 +387,20 @@ func getTask(ctx context.Context, q rowQuerier, repo string, id int64) (task.Tas
 
 func scanTask(row scanner) (task.Task, error) {
 	var (
-		tk               task.Task
-		status           string
-		created, updated int64
+		tk                     task.Task
+		status, kind, priority string
+		epic                   sql.NullInt64
+		created, updated       int64
 	)
-	if err := row.Scan(&tk.ID, &tk.Repo, &tk.Body, &status, &created, &updated); err != nil {
+	if err := row.Scan(&tk.ID, &tk.Repo, &tk.Body, &status, &kind, &priority, &epic, &created, &updated); err != nil {
 		return task.Task{}, fmt.Errorf("scan task: %w", err)
 	}
 	tk.Status = task.Status(status)
+	tk.Kind = task.Kind(kind)
+	tk.Priority = task.Priority(priority)
+	if epic.Valid {
+		tk.EpicID = &epic.Int64
+	}
 	tk.CreatedAt = time.Unix(created, 0)
 	tk.UpdatedAt = time.Unix(updated, 0)
 	return tk, nil

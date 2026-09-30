@@ -154,7 +154,7 @@ func (a api) listTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	tasks, err := a.store.List(r.Context(), repo, nil)
+	tasks, err := a.store.List(r.Context(), repo, store.Filter{})
 	if err != nil {
 		writeError(w, err)
 		return
@@ -176,10 +176,7 @@ func (a api) createTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if in.Status == "" {
-		in.Status = task.Backlog
-	}
-	tk, err := a.store.Add(r.Context(), repo, in.Body, in.Status)
+	tk, err := a.store.Add(r.Context(), repo, task.Draft{Body: in.Body, Status: in.Status})
 	if err != nil {
 		writeError(w, err)
 		return

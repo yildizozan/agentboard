@@ -24,7 +24,7 @@ func openTemp(t *testing.T) (*Store, string) {
 
 func mustAdd(t *testing.T, s *Store, repo, body string, status task.Status) task.Task {
 	t.Helper()
-	tk, err := s.Add(context.Background(), repo, body, status)
+	tk, err := s.Add(context.Background(), repo, task.Draft{Body: body, Status: status})
 	if err != nil {
 		t.Fatalf("Add(%q): %v", body, err)
 	}
@@ -41,7 +41,7 @@ func TestReopenKeepsTasks(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer s2.Close()
-	got, err := s2.List(context.Background(), "/r", nil)
+	got, err := s2.List(context.Background(), "/r", Filter{})
 	if err != nil || len(got) != 1 {
 		t.Fatalf("List after reopen = %v, %v; want 1 task", got, err)
 	}
@@ -60,7 +60,7 @@ func TestOpenUsesWAL(t *testing.T) {
 
 func TestAddReturnsStoredTask(t *testing.T) {
 	s, _ := openTemp(t)
-	tk, err := s.Add(context.Background(), "/r", "  Fix login  \n\ndetails\n", task.Todo)
+	tk, err := s.Add(context.Background(), "/r", task.Draft{Body: "  Fix login  \n\ndetails\n", Status: task.Todo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,13 +75,13 @@ func TestAddReturnsStoredTask(t *testing.T) {
 func TestAddRejectsInvalidInput(t *testing.T) {
 	s, _ := openTemp(t)
 	ctx := context.Background()
-	if _, err := s.Add(ctx, "/r", "  ", task.Todo); !errors.Is(err, task.ErrNoTitle) {
+	if _, err := s.Add(ctx, "/r", task.Draft{Body: "  ", Status: task.Todo}); !errors.Is(err, task.ErrNoTitle) {
 		t.Errorf("blank body error = %v, want ErrNoTitle", err)
 	}
-	if _, err := s.Add(ctx, "/r", "x", task.Status("later")); err == nil {
+	if _, err := s.Add(ctx, "/r", task.Draft{Body: "x", Status: task.Status("later")}); err == nil {
 		t.Error("invalid status accepted")
 	}
-	if _, err := s.Add(ctx, "", "x", task.Todo); err == nil {
+	if _, err := s.Add(ctx, "", task.Draft{Body: "x", Status: task.Todo}); err == nil {
 		t.Error("empty repo accepted")
 	}
 }
@@ -91,7 +91,7 @@ func TestListIsolatesRepos(t *testing.T) {
 	mustAdd(t, s, "/a", "in a", task.Todo)
 	mustAdd(t, s, "/b", "in b", task.Todo)
 
-	got, err := s.List(context.Background(), "/a", nil)
+	got, err := s.List(context.Background(), "/a", Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,19 +109,19 @@ func TestListFiltersAndOrders(t *testing.T) {
 	todo2 := mustAdd(t, s, "/r", "todo 2", task.Todo)
 	ctx := context.Background()
 
-	all, err := s.List(ctx, "/r", nil)
+	all, err := s.List(ctx, "/r", Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertIDs(t, all, backlog.ID, todo1.ID, todo2.ID, doing.ID, done.ID)
 
-	active, err := s.List(ctx, "/r", task.ActiveStatuses())
+	active, err := s.List(ctx, "/r", Filter{Statuses: task.ActiveStatuses()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertIDs(t, active, backlog.ID, todo1.ID, todo2.ID, doing.ID)
 
-	onlyDone, err := s.List(ctx, "/r", []task.Status{task.Done})
+	onlyDone, err := s.List(ctx, "/r", Filter{Statuses: []task.Status{task.Done}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestConcurrentWritersAcrossStores(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if _, err := s.Add(context.Background(), "/r", fmt.Sprintf("s%d-w%d", i, j), task.Todo); err != nil {
+				if _, err := s.Add(context.Background(), "/r", task.Draft{Body: fmt.Sprintf("s%d-w%d", i, j), Status: task.Todo}); err != nil {
 					errs <- err
 				}
 			}()
@@ -179,7 +179,7 @@ func TestConcurrentWritersAcrossStores(t *testing.T) {
 	wg.Wait()
 	checkErrs(t, errs)
 
-	got, err := opened[0].List(context.Background(), "/r", nil)
+	got, err := opened[0].List(context.Background(), "/r", Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func ptr[T any](v T) *T { return &v }
 
 func get(t *testing.T, s *Store, repo string, id int64) task.Task {
 	t.Helper()
-	tasks, err := s.List(context.Background(), repo, nil)
+	tasks, err := s.List(context.Background(), repo, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,5 +427,187 @@ func TestMergeRejectsSelfMissingAndOtherRepo(t *testing.T) {
 		if got, err := s.Get(ctx, repo, tk.ID); err != nil || got.Body != tk.Body {
 			t.Errorf("%s changed after refused merges: %+v, %v", repo, got, err)
 		}
+	}
+}
+
+// addDraft adds d to repo and fails the test on error.
+func addDraft(t *testing.T, s *Store, repo string, d task.Draft) task.Task {
+	t.Helper()
+	tk, err := s.Add(context.Background(), repo, d)
+	if err != nil {
+		t.Fatalf("Add(%+v): %v", d, err)
+	}
+	return tk
+}
+
+func TestAddStoresKindPriorityAndEpic(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	plain := addDraft(t, s, "/r", task.Draft{Body: "# plain"})
+	epic := addDraft(t, s, "/r", task.Draft{Body: "# Auth rewrite", Kind: task.EpicKind, Priority: task.High})
+	child := addDraft(t, s, "/r", task.Draft{Body: "# Login", Status: task.Todo, Priority: task.Low, EpicID: &epic.ID})
+
+	for _, tc := range []struct {
+		got      task.Task
+		kind     task.Kind
+		priority task.Priority
+		epic     *int64
+	}{
+		{plain, task.TaskKind, task.Normal, nil},
+		{epic, task.EpicKind, task.High, nil},
+		{child, task.TaskKind, task.Low, &epic.ID},
+	} {
+		stored, err := s.Get(ctx, "/r", tc.got.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, x := range []task.Task{tc.got, stored} {
+			if x.Kind != tc.kind || x.Priority != tc.priority || !sameEpic(x.EpicID, tc.epic) {
+				t.Errorf("#%d = kind %q, priority %q, epic %v; want %q, %q, %v",
+					x.ID, x.Kind, x.Priority, x.EpicID, tc.kind, tc.priority, tc.epic)
+			}
+		}
+	}
+}
+
+func sameEpic(a, b *int64) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
+}
+
+func TestEpicLinksMustNameAnEpicOfTheSameBoard(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	epic := addDraft(t, s, "/r", task.Draft{Body: "# epic", Kind: task.EpicKind})
+	other := addDraft(t, s, "/r", task.Draft{Body: "# other epic", Kind: task.EpicKind})
+	plain := addDraft(t, s, "/r", task.Draft{Body: "# plain"})
+	foreign := addDraft(t, s, "/elsewhere", task.Draft{Body: "# foreign epic", Kind: task.EpicKind})
+	missing := int64(999)
+
+	for name, tc := range map[string]struct {
+		epicID int64
+		want   error
+	}{
+		"missing epic":    {missing, task.ErrNotFound},
+		"epic of another": {foreign.ID, task.ErrNotFound},
+		"not an epic":     {plain.ID, task.ErrInvalid},
+	} {
+		if _, err := s.Add(ctx, "/r", task.Draft{Body: "# x", EpicID: &tc.epicID}); !errors.Is(err, tc.want) {
+			t.Errorf("Add with %s: error = %v, want %v", name, err, tc.want)
+		}
+		if _, err := s.Update(ctx, "/r", plain.ID, task.Patch{Epic: &tc.epicID}); !errors.Is(err, tc.want) {
+			t.Errorf("Update with %s: error = %v, want %v", name, err, tc.want)
+		}
+	}
+	if _, err := s.Update(ctx, "/r", epic.ID, task.Patch{Epic: &other.ID}); !errors.Is(err, task.ErrNestedEpic) {
+		t.Errorf("epic into epic: error = %v, want ErrNestedEpic", err)
+	}
+	if got, _ := s.Get(ctx, "/r", plain.ID); got.EpicID != nil {
+		t.Errorf("refused links changed the task: %+v", got)
+	}
+}
+
+func TestUpdateLinksUnlinksAndReprioritizes(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	epic := addDraft(t, s, "/r", task.Draft{Body: "# epic", Kind: task.EpicKind})
+	tk := addDraft(t, s, "/r", task.Draft{Body: "# task"})
+
+	got, err := s.Update(ctx, "/r", tk.ID, task.Patch{Epic: &epic.ID, Priority: ptr(task.High)})
+	if err != nil || !sameEpic(got.EpicID, &epic.ID) || got.Priority != task.High || got.Body != "# task" {
+		t.Fatalf("link = %+v, %v", got, err)
+	}
+	got, err = s.Update(ctx, "/r", tk.ID, task.Patch{Epic: ptr(int64(0))})
+	if err != nil || got.EpicID != nil || got.Priority != task.High {
+		t.Fatalf("unlink = %+v, %v", got, err)
+	}
+	if stored, _ := s.Get(ctx, "/r", tk.ID); stored.EpicID != nil || stored.Priority != task.High {
+		t.Errorf("stored after unlink = %+v", stored)
+	}
+}
+
+func TestListOrdersByPriorityWithinStatus(t *testing.T) {
+	s, _ := openTemp(t)
+	low := addDraft(t, s, "/r", task.Draft{Body: "# low", Status: task.Todo, Priority: task.Low})
+	high := addDraft(t, s, "/r", task.Draft{Body: "# high", Status: task.Todo, Priority: task.High})
+	normal := addDraft(t, s, "/r", task.Draft{Body: "# normal", Status: task.Todo})
+	high2 := addDraft(t, s, "/r", task.Draft{Body: "# high 2", Status: task.Todo, Priority: task.High})
+	doingLow := addDraft(t, s, "/r", task.Draft{Body: "# doing low", Status: task.Doing, Priority: task.Low})
+	backlogHigh := addDraft(t, s, "/r", task.Draft{Body: "# backlog high", Priority: task.High})
+	got, err := s.List(context.Background(), "/r", Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIDs(t, got, backlogHigh.ID, high.ID, high2.ID, normal.ID, low.ID, doingLow.ID)
+}
+
+func TestListFiltersByEpic(t *testing.T) {
+	s, _ := openTemp(t)
+	epic := addDraft(t, s, "/r", task.Draft{Body: "# epic", Kind: task.EpicKind})
+	a := addDraft(t, s, "/r", task.Draft{Body: "# a", EpicID: &epic.ID})
+	addDraft(t, s, "/r", task.Draft{Body: "# unrelated"})
+	b := addDraft(t, s, "/r", task.Draft{Body: "# b", Status: task.Done, EpicID: &epic.ID})
+	got, err := s.List(context.Background(), "/r", Filter{Epic: epic.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIDs(t, got, a.ID, b.ID)
+	active, err := s.List(context.Background(), "/r", Filter{Epic: epic.ID, Statuses: task.ActiveStatuses()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIDs(t, active, a.ID)
+}
+
+func TestDeletingAnEpicUnlinksItsTasks(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	epic := addDraft(t, s, "/r", task.Draft{Body: "# epic", Kind: task.EpicKind})
+	child := addDraft(t, s, "/r", task.Draft{Body: "# child", EpicID: &epic.ID})
+	if err := s.Delete(ctx, "/r", epic.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Get(ctx, "/r", child.ID); err != nil || got.EpicID != nil {
+		t.Errorf("child after epic delete = %+v, %v; want it kept without an epic", got, err)
+	}
+}
+
+func TestMergingEpicsMovesTheirTasks(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	keep := addDraft(t, s, "/r", task.Draft{Body: "# keep", Kind: task.EpicKind})
+	dup := addDraft(t, s, "/r", task.Draft{Body: "# duplicate", Kind: task.EpicKind})
+	child := addDraft(t, s, "/r", task.Draft{Body: "# child", EpicID: &dup.ID})
+	if _, err := s.Merge(ctx, "/r", keep.ID, dup.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(ctx, "/r", child.ID); !sameEpic(got.EpicID, &keep.ID) {
+		t.Errorf("child epic after merge = %v, want #%d", got.EpicID, keep.ID)
+	}
+}
+
+func TestMergingAnEpicIntoATaskIsRefused(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	plain := addDraft(t, s, "/r", task.Draft{Body: "# plain"})
+	epic := addDraft(t, s, "/r", task.Draft{Body: "# epic", Kind: task.EpicKind})
+	child := addDraft(t, s, "/r", task.Draft{Body: "# child", EpicID: &epic.ID})
+	if _, err := s.Merge(ctx, "/r", plain.ID, epic.ID); !errors.Is(err, task.ErrInvalid) {
+		t.Fatalf("epic into task: error = %v, want ErrInvalid", err)
+	}
+	if got, _ := s.Get(ctx, "/r", child.ID); !sameEpic(got.EpicID, &epic.ID) {
+		t.Errorf("child changed after refused merge: %+v", got)
+	}
+	if got, _ := s.Get(ctx, "/r", plain.ID); got.Body != "# plain" {
+		t.Errorf("target changed after refused merge: %q", got.Body)
+	}
+}
+
+func TestMergingATaskIntoAnEpicKeepsTheEpic(t *testing.T) {
+	s, _ := openTemp(t)
+	epic := addDraft(t, s, "/r", task.Draft{Body: "# epic", Kind: task.EpicKind, Priority: task.High})
+	tk := addDraft(t, s, "/r", task.Draft{Body: "# task"})
+	got, err := s.Merge(context.Background(), "/r", epic.ID, tk.ID)
+	if err != nil || got.Kind != task.EpicKind || got.Priority != task.High {
+		t.Errorf("task into epic = %+v, %v", got, err)
 	}
 }

@@ -54,7 +54,7 @@ func (e env) do(t *testing.T, method, target, body string) *httptest.ResponseRec
 
 func (e env) add(t *testing.T, repo, body string, status task.Status) task.Task {
 	t.Helper()
-	tk, err := e.store.Add(context.Background(), repo, body, status)
+	tk, err := e.store.Add(context.Background(), repo, task.Draft{Body: body, Status: status})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestWritesRequireJSON(t *testing.T) {
 		e.h.ServeHTTP(rec, req)
 		expectStatus(t, rec, 415)
 	}
-	if got, _ := e.store.List(context.Background(), repoA, nil); len(got) != 1 || got[0].Title() != "card" {
+	if got, _ := e.store.List(context.Background(), repoA, store.Filter{}); len(got) != 1 || got[0].Title() != "card" {
 		t.Errorf("non-JSON write changed the DB: %+v", got)
 	}
 }

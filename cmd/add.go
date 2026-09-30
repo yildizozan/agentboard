@@ -27,7 +27,7 @@ func newAddCmd(opts *options) *cobra.Command {
 				return err
 			}
 			return opts.withBoard(func(s *store.Store, repoKey string) error {
-				tk, err := s.Add(cmd.Context(), repoKey, body, st)
+				tk, err := s.Add(cmd.Context(), repoKey, task.Draft{Body: body, Status: st})
 				if err != nil {
 					return err
 				}

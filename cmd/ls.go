@@ -25,7 +25,7 @@ func newLsCmd(opts *options) *cobra.Command {
 				statuses = []task.Status{st}
 			}
 			return opts.withBoard(func(s *store.Store, repoKey string) error {
-				tasks, err := s.List(cmd.Context(), repoKey, statuses)
+				tasks, err := s.List(cmd.Context(), repoKey, store.Filter{Statuses: statuses})
 				if err != nil {
 					return err
 				}
