@@ -23,7 +23,7 @@ const bodyGuide = `Markdown body; the first line must be the "# <title>" heading
 
 // epicGuide explains epics and priorities once for every tool that sets them.
 const epicGuide = "Kinds: task (default) or epic; an epic groups the tasks of a larger piece of work, and a task " +
-	"belongs to at most one epic (epics cannot be nested). Priorities: low, normal (default) or high; columns list high first."
+	"must belong to exactly one epic on the same board; create a parent epic first (epics cannot be nested). Priorities: low, normal (default) or high; columns list high first."
 
 // cwdInput is embedded in every tool input: the board is chosen per call from the agent's cwd.
 type cwdInput struct {
@@ -36,7 +36,7 @@ type addInput struct {
 	Status   string `json:"status,omitempty" jsonschema:"initial status: backlog (default), todo, doing or done"`
 	Kind     string `json:"kind,omitempty" jsonschema:"task (default) or epic"`
 	Priority string `json:"priority,omitempty" jsonschema:"low, normal (default) or high"`
-	Epic     int64  `json:"epic,omitempty" jsonschema:"id of the epic this task belongs to"`
+	Epic     int64  `json:"epic,omitempty" jsonschema:"parent epic id; required for tasks, omitted for epics"`
 }
 
 type listInput struct {
@@ -57,7 +57,7 @@ type updateInput struct {
 	ID       int64   `json:"id" jsonschema:"task id"`
 	Body     *string `json:"body,omitempty" jsonschema:"new card content; replaces the whole body"`
 	Priority *string `json:"priority,omitempty" jsonschema:"new priority: low, normal or high"`
-	Epic     *int64  `json:"epic,omitempty" jsonschema:"id of the epic to link the task to; 0 removes the link"`
+	Epic     *int64  `json:"epic,omitempty" jsonschema:"positive id of the epic to move the task to; the parent cannot be removed"`
 }
 
 type mergeInput struct {
@@ -111,7 +111,7 @@ func New(s *store.Store, version string) *mcp.Server {
 	}, h.merge)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "task_delete",
-		Description: "Delete a task permanently. Prefer moving finished work to done; delete only tasks created by mistake.",
+		Description: "Delete a task permanently. An epic with tasks cannot be deleted: move or delete its tasks first. Prefer moving finished work to done; delete only tasks created by mistake.",
 	}, h.delete)
 	return server
 }

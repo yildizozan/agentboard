@@ -75,6 +75,12 @@ func mustCall(t *testing.T, cs *mcp.ClientSession, name string, args map[string]
 	return out
 }
 
+// parentEpic creates a completed epic for ordinary task fixtures.
+func parentEpic(t *testing.T, cs *mcp.ClientSession, dir string) {
+	t.Helper()
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Test epic", "kind": "epic", "status": "done", "priority": "low"})
+}
+
 func TestListToolsExposesCwdAndSchemas(t *testing.T) {
 	cs := connect(t)
 	res, err := cs.ListTools(context.Background(), nil)
@@ -109,19 +115,20 @@ func TestListToolsExposesCwdAndSchemas(t *testing.T) {
 func TestAddAndList(t *testing.T) {
 	cs := connect(t)
 	dir := workDir(t)
-	if out := mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "Fix login"}); out != "#1 [backlog] Fix login" {
+	parentEpic(t, cs, dir)
+	if out := mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "Fix login", "epic": 1}); out != "#2 [backlog] Fix login (epic #1)" {
 		t.Errorf("task_add = %q", out)
 	}
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "Ship it", "status": "done"})
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Now\n\n## Context\ndetails", "status": "doing"})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "Ship it", "status": "done", "epic": 1})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Now\n\n## Context\ndetails", "status": "doing", "epic": 1})
 
-	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir}); out != "#1 [backlog] Fix login\n#3 [doing] Now" {
+	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir}); out != "#2 [backlog] Fix login (epic #1)\n#4 [doing] Now (epic #1)" {
 		t.Errorf("task_list = %q", out)
 	}
-	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir, "status": "done"}); out != "#2 [done] Ship it" {
+	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir, "status": "done"}); out != "#3 [done] Ship it (epic #1)\n#1 [done] [epic] [low] Test epic" {
 		t.Errorf("task_list done = %q", out)
 	}
-	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 3}); out != "#3 [doing] Now\n\n# Now\n\n## Context\ndetails" {
+	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 4}); out != "#4 [doing] Now (epic #1)\n\n# Now\n\n## Context\ndetails" {
 		t.Errorf("task_get = %q", out)
 	}
 }
@@ -129,7 +136,8 @@ func TestAddAndList(t *testing.T) {
 func TestListEmptyAndRepoIsolation(t *testing.T) {
 	cs := connect(t)
 	a, b := workDir(t), workDir(t)
-	mustCall(t, cs, "task_add", map[string]any{"cwd": a, "body": "only in a"})
+	parentEpic(t, cs, a)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": a, "body": "only in a", "epic": 1})
 	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": b}); out != "no tasks" {
 		t.Errorf("task_list in other repo = %q", out)
 	}
@@ -156,11 +164,12 @@ func TestInvalidInputIsToolError(t *testing.T) {
 func TestMoveWithFromConflict(t *testing.T) {
 	cs := connect(t)
 	dir := workDir(t)
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "claim me", "status": "todo"})
-	if out := mustCall(t, cs, "task_move", map[string]any{"cwd": dir, "id": 1, "status": "doing", "from": "todo"}); out != "#1 [doing] claim me" {
+	parentEpic(t, cs, dir)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "claim me", "status": "todo", "epic": 1})
+	if out := mustCall(t, cs, "task_move", map[string]any{"cwd": dir, "id": 2, "status": "doing", "from": "todo"}); out != "#2 [doing] claim me (epic #1)" {
 		t.Errorf("task_move = %q", out)
 	}
-	out, isErr := call(t, cs, "task_move", map[string]any{"cwd": dir, "id": 1, "status": "doing", "from": "todo"})
+	out, isErr := call(t, cs, "task_move", map[string]any{"cwd": dir, "id": 2, "status": "doing", "from": "todo"})
 	if !isErr || !strings.Contains(out, "doing") {
 		t.Errorf("second claim = %q (isError=%v), want conflict naming current status", out, isErr)
 	}
@@ -169,17 +178,18 @@ func TestMoveWithFromConflict(t *testing.T) {
 func TestUpdateAndDelete(t *testing.T) {
 	cs := connect(t)
 	dir := workDir(t)
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "old", "status": "todo"})
-	if out := mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 1, "body": "# new\n\n- [x] done"}); out != "#1 [todo] new" {
+	parentEpic(t, cs, dir)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "old", "status": "todo", "epic": 1})
+	if out := mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 2, "body": "# new\n\n- [x] done"}); out != "#2 [todo] new (epic #1)" {
 		t.Errorf("task_update = %q", out)
 	}
-	if out, isErr := call(t, cs, "task_update", map[string]any{"cwd": dir, "id": 1}); !isErr {
+	if out, isErr := call(t, cs, "task_update", map[string]any{"cwd": dir, "id": 2}); !isErr {
 		t.Errorf("empty task_update = %q, want tool error", out)
 	}
-	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir}); out != "#1 [todo] new" {
+	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir}); out != "#2 [todo] new (epic #1)" {
 		t.Errorf("task_list after update = %q", out)
 	}
-	if out := mustCall(t, cs, "task_delete", map[string]any{"cwd": dir, "id": 1}); out != "deleted #1" {
+	if out := mustCall(t, cs, "task_delete", map[string]any{"cwd": dir, "id": 2}); out != "deleted #2" {
 		t.Errorf("task_delete = %q", out)
 	}
 	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir}); out != "no tasks" {
@@ -190,24 +200,26 @@ func TestUpdateAndDelete(t *testing.T) {
 func TestOneServerServesSeveralReposWithoutLeaks(t *testing.T) {
 	cs := connect(t)
 	a, b := workDir(t), workDir(t)
-	mustCall(t, cs, "task_add", map[string]any{"cwd": a, "body": "in a"})
-	mustCall(t, cs, "task_add", map[string]any{"cwd": b, "body": "in b"})
+	parentEpic(t, cs, a)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": a, "body": "in a", "epic": 1})
+	parentEpic(t, cs, b)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": b, "body": "in b", "epic": 3})
 
 	for name, args := range map[string]map[string]any{
-		"task_move":   {"cwd": b, "id": 1, "status": "done"},
-		"task_get":    {"cwd": b, "id": 1},
-		"task_update": {"cwd": b, "id": 1, "body": "hijacked"},
-		"task_delete": {"cwd": b, "id": 1},
-		"task_merge":  {"cwd": b, "id": 2, "source": 1},
+		"task_move":   {"cwd": b, "id": 2, "status": "done"},
+		"task_get":    {"cwd": b, "id": 2},
+		"task_update": {"cwd": b, "id": 2, "body": "hijacked"},
+		"task_delete": {"cwd": b, "id": 2},
+		"task_merge":  {"cwd": b, "id": 4, "source": 2},
 	} {
 		if out, isErr := call(t, cs, name, args); !isErr || !strings.Contains(out, "not found") {
 			t.Errorf("%s on other repo's task = %q (isError=%v), want not found", name, out, isErr)
 		}
 	}
-	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": a}); out != "#1 [backlog] in a" {
+	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": a}); out != "#2 [backlog] in a (epic #1)" {
 		t.Errorf("repo a changed: %q", out)
 	}
-	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": b}); out != "#2 [backlog] in b" {
+	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": b}); out != "#4 [backlog] in b (epic #3)" {
 		t.Errorf("repo b = %q", out)
 	}
 }
@@ -215,15 +227,16 @@ func TestOneServerServesSeveralReposWithoutLeaks(t *testing.T) {
 func TestMergeFoldsSourceIntoTarget(t *testing.T) {
 	cs := connect(t)
 	dir := workDir(t)
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Fix login", "status": "todo"})
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Login broken\n\n## Context\nsame bug"})
-	if out := mustCall(t, cs, "task_merge", map[string]any{"cwd": dir, "id": 1, "source": 2}); out != "merged #2 into #1\n#1 [todo] Fix login" {
+	parentEpic(t, cs, dir)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Fix login", "status": "todo", "epic": 1})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Login broken\n\n## Context\nsame bug", "epic": 1})
+	if out := mustCall(t, cs, "task_merge", map[string]any{"cwd": dir, "id": 2, "source": 3}); out != "merged #3 into #2\n#2 [todo] Fix login (epic #1)" {
 		t.Errorf("task_merge = %q", out)
 	}
-	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 1}); out != "#1 [todo] Fix login\n\n# Fix login\n\n## Merged from #2: Login broken\n\n### Context\nsame bug" {
+	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 2}); out != "#2 [todo] Fix login (epic #1)\n\n# Fix login\n\n## Merged from #3: Login broken\n\n### Context\nsame bug" {
 		t.Errorf("task_get after merge = %q", out)
 	}
-	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir}); out != "#1 [todo] Fix login" {
+	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir}); out != "#2 [todo] Fix login (epic #1)" {
 		t.Errorf("task_list after merge = %q", out)
 	}
 }
@@ -231,10 +244,11 @@ func TestMergeFoldsSourceIntoTarget(t *testing.T) {
 func TestMergeRefusesDoingSource(t *testing.T) {
 	cs := connect(t)
 	dir := workDir(t)
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# target"})
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# claimed", "status": "doing"})
-	out, isErr := call(t, cs, "task_merge", map[string]any{"cwd": dir, "id": 1, "source": 2})
-	if !isErr || !strings.Contains(out, "#2 is in doing") {
+	parentEpic(t, cs, dir)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# target", "epic": 1})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# claimed", "status": "doing", "epic": 1})
+	out, isErr := call(t, cs, "task_merge", map[string]any{"cwd": dir, "id": 2, "source": 3})
+	if !isErr || !strings.Contains(out, "#3 is in doing") {
 		t.Errorf("merge of doing source = %q (isError=%v), want conflict", out, isErr)
 	}
 }
@@ -248,31 +262,32 @@ func TestEpicsPrioritiesAndEpicFilter(t *testing.T) {
 	if out := mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Login", "epic": 1, "priority": "low"}); out != "#2 [backlog] [low] Login (epic #1)" {
 		t.Errorf("add linked task = %q", out)
 	}
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Unrelated"})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Unrelated", "kind": "epic"})
 	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir, "epic": 1}); out != "#2 [backlog] [low] Login (epic #1)" {
 		t.Errorf("task_list epic 1 = %q", out)
 	}
 	if out := mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 2, "priority": "high"}); out != "#2 [backlog] [high] Login (epic #1)" {
 		t.Errorf("reprioritize = %q", out)
 	}
-	if out := mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 2, "epic": 0}); out != "#2 [backlog] [high] Login" {
-		t.Errorf("unlink = %q", out)
+	if out, isErr := call(t, cs, "task_update", map[string]any{"cwd": dir, "id": 2, "epic": 0}); !isErr {
+		t.Errorf("unlink accepted: %s", out)
 	}
-	if out := mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 2, "epic": 1}); out != "#2 [backlog] [high] Login (epic #1)" {
-		t.Errorf("relink = %q", out)
+	if out := mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 2, "epic": 3}); out != "#2 [backlog] [high] Login (epic #3)" {
+		t.Errorf("move = %q", out)
 	}
 }
 
 func TestEpicAndPriorityErrorsAreToolErrors(t *testing.T) {
 	cs := connect(t)
 	dir := workDir(t)
-	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# plain"})
+	parentEpic(t, cs, dir)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# plain", "epic": 1})
 	for name, args := range map[string]map[string]any{
 		"unknown kind":     {"cwd": dir, "body": "# x", "kind": "story"},
 		"unknown priority": {"cwd": dir, "body": "# x", "priority": "urgent"},
-		"link to non-epic": {"cwd": dir, "body": "# x", "epic": 1},
+		"link to non-epic": {"cwd": dir, "body": "# x", "epic": 2},
 		"missing epic":     {"cwd": dir, "body": "# x", "epic": 99},
-		"epic in epic":     {"cwd": dir, "body": "# x", "kind": "epic", "epic": 1},
+		"epic in epic":     {"cwd": dir, "body": "# x", "kind": "epic", "epic": 2},
 	} {
 		if out, isErr := call(t, cs, "task_add", args); !isErr {
 			t.Errorf("%s: task_add = %q, want tool error", name, out)
@@ -300,4 +315,19 @@ func TestUpdateNeedsOnlyTheFieldsItChanges(t *testing.T) {
 			t.Errorf("task_update required = %v, want [cwd id]", schema.Required)
 		}
 	}
+}
+
+func TestTaskRequiresEpicOverMCP(t *testing.T) {
+	cs := connect(t)
+	dir := workDir(t)
+	if out, isErr := call(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Missing parent"}); !isErr {
+		t.Fatalf("missing epic accepted: %s", out)
+	}
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Epic", "kind": "epic"})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Child", "epic": 1})
+	if out, isErr := call(t, cs, "task_delete", map[string]any{"cwd": dir, "id": 1}); !isErr {
+		t.Fatalf("populated epic deleted: %s", out)
+	}
+	mustCall(t, cs, "task_delete", map[string]any{"cwd": dir, "id": 2})
+	mustCall(t, cs, "task_delete", map[string]any{"cwd": dir, "id": 1})
 }

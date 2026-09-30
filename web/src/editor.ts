@@ -5,6 +5,7 @@ import type { Kind, Priority } from './api'
 // EditorFields adds selects above the body. kind is shown only when set, i.e. for new cards.
 export interface EditorFields {
   kind?: Kind
+  cardKind?: Kind // existing card kind; does not show a kind selector
   priority: Priority
   priorities: Priority[]
   epic: number | null
@@ -47,13 +48,15 @@ function fieldsRow(f: EditorFields): { row: HTMLElement; values: () => Omit<Edit
   const row = document.createElement('div')
   row.className = 'editor-fields'
   const priority = selectOf('Priority', f.priorities.map((p) => [p, p]), f.priority)
-  const epic = selectOf('Epic', [['', 'No epic'], ...f.epics.map((e): [string, string] => [String(e.id), `#${e.id} ${e.title}`])],
+  const epic = selectOf('Epic', [['', 'Select an epic'], ...f.epics.map((e): [string, string] => [String(e.id), `#${e.id} ${e.title}`])],
     f.epic === null ? '' : String(f.epic))
   const kind = f.kind === undefined ? null : selectOf('Kind', [['task', 'Task'], ['epic', 'Epic']], f.kind)
   // An epic cannot belong to another epic.
   const syncEpic = () => {
-    epic.disabled = kind?.value === 'epic'
+    epic.disabled = (kind?.value ?? f.cardKind ?? 'task') === 'epic'
+    epic.required = !epic.disabled
     if (epic.disabled) epic.value = ''
+    epic.setCustomValidity(!epic.disabled && f.epics.length === 0 ? 'Create an epic before adding a task.' : '')
   }
   kind?.addEventListener('change', syncEpic)
   syncEpic()

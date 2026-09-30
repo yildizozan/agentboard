@@ -22,8 +22,8 @@ import (
 
 // dsnParams make concurrent writers from several processes safe:
 // busy_timeout waits for locks instead of failing, and immediate transactions take
-// the write lock up front so read-then-write steps cannot deadlock. foreign_keys makes
-// deleting an epic clear the epic_id of its tasks.
+// the write lock up front so read-then-write steps cannot deadlock. foreign_keys protects
+// references between tasks and epics.
 // WAL is not set here: it persists in the file and is enabled once by enableWAL.
 const dsnParams = "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
 
@@ -203,24 +203,18 @@ func (s *Store) Get(ctx context.Context, repo string, id int64) (task.Task, erro
 	return getTask(ctx, s.db, repo, id)
 }
 
-// linkEpic applies an epic change to tk: nil keeps the link, 0 removes it, and any other id
-// must name an epic of tk's repo. An epic cannot be linked to another epic.
+// linkEpic keeps the parent or moves tk to another epic of the same board.
 func linkEpic(ctx context.Context, q rowQuerier, tk *task.Task, epic *int64) error {
-	if epic == nil {
-		return nil
+	if epic != nil {
+		tk.EpicID = epic
 	}
-	if *epic == 0 {
-		tk.EpicID = nil
-		return nil
-	}
-	if tk.Kind == task.EpicKind {
-		return task.ErrNestedEpic
-	}
-	if err := checkEpic(ctx, q, tk.Repo, *epic); err != nil {
+	if err := task.ValidateEpic(tk.Kind, tk.EpicID); err != nil {
 		return err
 	}
-	tk.EpicID = epic
-	return nil
+	if tk.EpicID == nil {
+		return nil
+	}
+	return checkEpic(ctx, q, tk.Repo, *tk.EpicID)
 }
 
 // Merge appends task sourceID to task targetID of repo (task.MergeBody) and deletes the
@@ -251,13 +245,17 @@ func (s *Store) Merge(ctx context.Context, repo string, targetID, sourceID int64
 		return task.Task{}, task.Invalidf("cannot merge epic #%d into task #%d: merge it into an epic", sourceID, targetID)
 	}
 
+	if err := task.ValidateEpic(target.Kind, target.EpicID); err != nil {
+		return task.Task{}, err
+	}
+
 	target.Body = task.MergeBody(target, source)
 	now := time.Now().Unix()
 	target.UpdatedAt = time.Unix(now, 0)
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET body = ?, updated_at = ? WHERE id = ?`, target.Body, now, targetID); err != nil {
 		return task.Task{}, fmt.Errorf("update merge target: %w", err)
 	}
-	// The source's tasks move to the target epic before the delete would unlink them.
+	// Move the source epic's tasks before deleting it, so every task keeps a parent.
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET epic_id = ? WHERE epic_id = ?`, targetID, sourceID); err != nil {
 		return task.Task{}, fmt.Errorf("move merged epic's tasks: %w", err)
 	}
@@ -270,18 +268,31 @@ func (s *Store) Merge(ctx context.Context, repo string, targetID, sourceID int64
 	return target, nil
 }
 
-// Delete removes task id from repo or returns task.ErrNotFound.
+// Delete removes task id from repo. An epic must be empty before it can be deleted.
 func (s *Store) Delete(ctx context.Context, repo string, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ? AND repo = ?`, id, repo)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("begin delete: %w", err)
+	}
+	defer tx.Rollback()
+	tk, err := getTask(ctx, tx, repo, id)
+	if err != nil {
+		return err
+	}
+	if tk.Kind == task.EpicKind {
+		var hasTasks bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE epic_id = ?)`, id).Scan(&hasTasks); err != nil {
+			return fmt.Errorf("check epic tasks: %w", err)
+		}
+		if hasTasks {
+			return task.ErrEpicHasTasks
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE id = ? AND repo = ?`, id, repo); err != nil {
 		return fmt.Errorf("delete task: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete task: %w", err)
-	}
-	if n == 0 {
-		return fmt.Errorf("#%d: %w", id, task.ErrNotFound)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete: %w", err)
 	}
 	return nil
 }

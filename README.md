@@ -98,20 +98,22 @@ Claude Code.
 
 | Tool          | Arguments                      | What it does                                          |
 |---------------|--------------------------------|-------------------------------------------------------|
-| `task_add`    | `cwd`, `body`, `status?`, `kind?`, `priority?`, `epic?` | Add a task or epic (default `backlog`, `task`, `normal`) |
+| `task_add`    | `cwd`, `body`, `status?`, `kind?`, `priority?`, `epic?` | Add a task or epic; `epic` is required for tasks |
 | `task_list`   | `cwd`, `status?`, `epic?`      | List title lines; without `status`, `done` is left out |
 | `task_get`    | `cwd`, `id`                    | Show a task's status line and full Markdown body      |
 | `task_move`   | `cwd`, `id`, `status`, `from?` | Move a task; with `from` it fails if the task moved   |
-| `task_update` | `cwd`, `id`, `body?`, `priority?`, `epic?` | Change body, priority or epic (`epic: 0` unlinks) |
+| `task_update` | `cwd`, `id`, `body?`, `priority?`, `epic?` | Change body, priority or move to another epic |
 | `task_merge`  | `cwd`, `id`, `source`          | Fold `source` into `id` and delete it (not if `doing`) |
-| `task_delete` | `cwd`, `id`                    | Delete a task permanently                             |
+| `task_delete` | `cwd`, `id`                    | Delete a task or an empty epic                        |
 
 ### Epics and priority
 
 A card is a `task` or an `epic`. An epic groups the tasks of a larger piece of
-work: a task links to at most one epic (`epic: <id>`), and epics do not nest.
-Deleting an epic keeps its tasks and unlinks them; merging an epic into another
-epic moves its tasks. Every card has a `low`, `normal` or `high` priority, and
+work: every task must belong to exactly one epic on the same board (`epic: <id>`),
+and epics do not nest. Create an epic first, then add its tasks. A task can move
+to another epic but cannot lose its parent. An epic with tasks cannot be deleted,
+even when those tasks are done; move or delete them first. Merging an epic into
+another epic moves its tasks. Every card has a `low`, `normal` or `high` priority, and
 each column lists high first. On the board every epic gets its own color, and
 its tasks show a light tone of that color.
 
@@ -153,8 +155,11 @@ directory as an absolute path in `cwd`.
 - Read a task with `task_get`; put findings or a narrowed scope into its body
   with `task_update`, which replaces the whole body.
 - Fold duplicate or closely related tasks into one with `task_merge`.
-- For work with several steps, open an epic (`kind: "epic"`) and link the
-  steps to it with `epic`; use `priority: "high"` only for work to pick first.
+- Every task needs an epic on the same board. Choose an existing epic for
+  its goal, or create one with `kind: "epic"` first, then pass its id as `epic`
+  when adding the task. Use `priority: "high"` only for work to pick first.
+- Move tasks between epics with `task_update`; their parent cannot be removed.
+  An epic with tasks cannot be deleted.
 - When a task is finished, move it to `done`.
 - Use this board for work that other agents or later sessions should see.
 ```
@@ -177,6 +182,23 @@ agentboard board [--addr 127.0.0.1:7420]
 agentboard --version
 ```
 
+Create the parent before its tasks:
+
+```bash
+agentboard add "# Authentication" --kind epic
+agentboard add "# Fix token expiry" --epic 1
+agentboard edit 2 --epic 3 # move to another existing epic
+```
+
+### Upgrading to 0.2.0
+
+Creating a task without an epic or removing its parent is now rejected across
+CLI, MCP and HTTP. Existing epics without parents remain valid. Older tasks
+without an epic are kept for cleanup: they can be read and deleted, but need a
+parent assigned before editing or moving. There is no automatic grouping or
+data deletion. Restart older board and MCP processes after upgrading so all
+writers enforce the same rule.
+
 ## Web board
 
 ```bash
@@ -188,7 +210,8 @@ page path, such as `http://127.0.0.1:7420/Users/me/project`. Pick any board from
 columns, drop a card on another card to merge it into that card, and add or
 delete tasks. Click a card title to read its rendered
 Markdown body and edit it, including its priority and epic (Cmd/Ctrl+Enter
-saves, Esc leaves the editor). An epic's dialog lists its tasks. The page refreshes every two seconds,
+saves, Esc leaves the editor). The editor requires an epic for tasks; on an empty
+board it starts with epic creation. An epic's dialog lists its tasks. The page refreshes every two seconds,
 so work done by agents shows up by itself. If an agent moved a card after the
 page last refreshed, dropping that card is refused and the board reloads
 instead of overwriting the agent's change.

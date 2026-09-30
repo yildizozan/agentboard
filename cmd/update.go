@@ -43,7 +43,7 @@ func newEditCmd(opts *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "edit <id> [<body>]",
 		Short: "Change a task's body, priority or epic",
-		Long:  bodyHelp("Change a task's body, priority or epic; give only what changes. -e 0 removes the epic link."),
+		Long:  bodyHelp("Change a task's body, priority or epic; give only what changes. --epic moves a task to another epic; the parent cannot be removed."),
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var p task.Patch
@@ -65,7 +65,7 @@ func newEditCmd(opts *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&priority, "priority", "p", "", "new priority: low, normal or high")
-	cmd.Flags().Int64VarP(&epic, "epic", "e", 0, "id of the epic to link the task to; 0 removes the link")
+	cmd.Flags().Int64VarP(&epic, "epic", "e", 0, "positive id of the epic to move the task to")
 	return cmd
 }
 

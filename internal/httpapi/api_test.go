@@ -54,11 +54,31 @@ func (e env) do(t *testing.T, method, target, body string) *httptest.ResponseRec
 
 func (e env) add(t *testing.T, repo, body string, status task.Status) task.Task {
 	t.Helper()
-	tk, err := e.store.Add(context.Background(), repo, task.Draft{Body: body, Status: status})
+	tk, err := e.store.Add(context.Background(), repo, task.Draft{Body: body, Status: status, EpicID: ptrEpic(e.epic(t, repo))})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return tk
+}
+
+func ptrEpic(id int64) *int64 { return &id }
+
+func (e env) epic(t *testing.T, repo string) int64 {
+	t.Helper()
+	cards, err := e.store.List(context.Background(), repo, store.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, card := range cards {
+		if card.Kind == task.EpicKind && card.Body == "# Test epic" {
+			return card.ID
+		}
+	}
+	card, err := e.store.Add(context.Background(), repo, task.Draft{Body: "# Test epic", Kind: task.EpicKind, Status: task.Done, Priority: task.Low})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return card.ID
 }
 
 func tasksURL(repo string) string { return "/api/tasks?repo=" + url.QueryEscape(repo) }
@@ -92,7 +112,7 @@ func TestRepos(t *testing.T) {
 	rec := e.do(t, "GET", "/api/repos", "")
 	expectStatus(t, rec, 200)
 	got := decode[[]repoJSON](t, rec)
-	if len(got) != 1 || got[0].Path != repoA || got[0].Name != "a" || got[0].Count != 2 {
+	if len(got) != 1 || got[0].Path != repoA || got[0].Name != "a" || got[0].Count != 3 {
 		t.Errorf("repos = %+v", got)
 	}
 }
@@ -107,7 +127,7 @@ func TestListTasksIncludesStatusesInOrder(t *testing.T) {
 	if strings.Join(statusNames(got.Statuses), ",") != "backlog,todo,doing,done" {
 		t.Errorf("statuses = %v", got.Statuses)
 	}
-	if len(got.Tasks) != 1 || got.Tasks[0].Title() != "done too" {
+	if len(got.Tasks) != 2 || got.Tasks[0].Title() != "done too" {
 		t.Errorf("tasks = %+v", got.Tasks)
 	}
 	expectStatus(t, e.do(t, "GET", "/api/tasks", ""), 400)
@@ -123,7 +143,8 @@ func statusNames(ss []task.Status) []string {
 
 func TestCreateTask(t *testing.T) {
 	e := newEnv(t, nil)
-	rec := e.do(t, "POST", tasksURL(repoA), `{"body":"New card\n\n## Context\nd"}`)
+	epicID := e.epic(t, repoA)
+	rec := e.do(t, "POST", tasksURL(repoA), `{"body":"New card\n\n## Context\nd","epic":`+jsonNumber(epicID)+`}`)
 	expectStatus(t, rec, 201)
 	got := decode[map[string]any](t, rec)
 	if got["title"] != "New card" || got["body"] != "# New card\n\n## Context\nd" || got["status"] != "backlog" || got["repo"] != repoA {
@@ -205,9 +226,10 @@ func TestCreateAndPatchEpicsAndPriorities(t *testing.T) {
 	}
 	childID := int64(child["id"].(float64))
 
-	rec = e.do(t, "PATCH", taskURL(childID, repoA), `{"priority":"low","epic":0}`)
+	expectStatus(t, e.do(t, "PATCH", taskURL(childID, repoA), `{"priority":"low","epic":0}`), 400)
+	rec = e.do(t, "PATCH", taskURL(childID, repoA), `{"priority":"low"}`)
 	expectStatus(t, rec, 200)
-	if got := decode[map[string]any](t, rec); got["priority"] != "low" || got["epicId"] != nil {
+	if got := decode[map[string]any](t, rec); got["priority"] != "low" || got["epicId"] != epic["id"] {
 		t.Errorf("patched = %+v", got)
 	}
 
@@ -278,7 +300,7 @@ func TestWritesRequireJSON(t *testing.T) {
 		e.h.ServeHTTP(rec, req)
 		expectStatus(t, rec, 415)
 	}
-	if got, _ := e.store.List(context.Background(), repoA, store.Filter{}); len(got) != 1 || got[0].Title() != "card" {
+	if got, _ := e.store.List(context.Background(), repoA, store.Filter{}); len(got) != 2 || got[0].Title() != "card" {
 		t.Errorf("non-JSON write changed the DB: %+v", got)
 	}
 }
@@ -355,4 +377,14 @@ func TestServesIndexForBoardPaths(t *testing.T) {
 			t.Errorf("GET %s = %d %q, want 404", path, rec.Code, rec.Body.String())
 		}
 	}
+}
+
+func TestTaskRequiresEpicOverHTTP(t *testing.T) {
+	e := newEnv(t, nil)
+	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `{"body":"# Missing parent"}`), 400)
+	epicID := e.epic(t, repoA)
+	child := e.add(t, repoA, "# Child", task.Todo)
+	expectStatus(t, e.do(t, "DELETE", taskURL(epicID, repoA), ""), 400)
+	expectStatus(t, e.do(t, "DELETE", taskURL(child.ID, repoA), ""), 204)
+	expectStatus(t, e.do(t, "DELETE", taskURL(epicID, repoA), ""), 204)
 }

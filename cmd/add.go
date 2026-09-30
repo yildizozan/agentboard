@@ -15,8 +15,8 @@ func newAddCmd(opts *options) *cobra.Command {
 	var epic int64
 	cmd := &cobra.Command{
 		Use:   "add <body>",
-		Short: "Add a task to the repository's board",
-		Long:  bodyHelp("Add a task to the repository's board."),
+		Short: "Add a task or epic to the repository's board",
+		Long:  bodyHelp("Add a task or epic to the repository's board. Tasks require --epic; create a parent with --kind epic first."),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := readBody(cmd, args[0])
@@ -40,7 +40,7 @@ func newAddCmd(opts *options) *cobra.Command {
 	cmd.Flags().StringVarP(&status, "status", "s", string(task.Backlog), "initial status: backlog, todo, doing or done")
 	cmd.Flags().StringVarP(&kind, "kind", "k", string(task.TaskKind), "task or epic")
 	cmd.Flags().StringVarP(&priority, "priority", "p", string(task.Normal), "low, normal or high")
-	cmd.Flags().Int64VarP(&epic, "epic", "e", 0, "id of the epic this task belongs to")
+	cmd.Flags().Int64VarP(&epic, "epic", "e", 0, "parent epic id (required for tasks; omit for epics)")
 	return cmd
 }
 
@@ -49,7 +49,7 @@ func bodyHelp(summary string) string {
 	return summary + ` The body is Markdown; its first line is the "# <title>" heading
 (a plain first line becomes the heading). Pass - to read the body from stdin:
 
-  agentboard add - <<'EOF'
+  agentboard add --epic 1 - <<'EOF'
   # Fix login bug
 
   ## Context

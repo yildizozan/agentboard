@@ -50,6 +50,14 @@ func setup(t *testing.T) string {
 	return newDir(t)
 }
 
+// setupBoard gives task fixtures a completed parent epic.
+func setupBoard(t *testing.T) string {
+	t.Helper()
+	dir := setup(t)
+	mustRun(t, "--repo", dir, "add", "# Test epic", "-k", "epic", "-s", "done", "-p", "low")
+	return dir
+}
+
 func newDir(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "work")
@@ -69,20 +77,20 @@ func TestHelpShowsRepoFlag(t *testing.T) {
 }
 
 func TestAddDefaultsToBacklog(t *testing.T) {
-	dir := setup(t)
-	out := mustRun(t, "--repo", dir, "add", "Fix login")
-	if out != "#1 [backlog] Fix login\n" {
+	dir := setupBoard(t)
+	out := mustRun(t, "--repo", dir, "add", "Fix login", "-e", "1")
+	if out != "#2 [backlog] Fix login (epic #1)\n" {
 		t.Errorf("add output = %q", out)
 	}
 }
 
 func TestAddMarkdownBodyAndShow(t *testing.T) {
-	dir := setup(t)
-	out := mustRun(t, "--repo", dir, "add", "# Write docs\n\n## Steps\n- [ ] README", "-s", "todo")
-	if out != "#1 [todo] Write docs\n" {
+	dir := setupBoard(t)
+	out := mustRun(t, "--repo", dir, "add", "# Write docs\n\n## Steps\n- [ ] README", "-s", "todo", "-e", "1")
+	if out != "#2 [todo] Write docs (epic #1)\n" {
 		t.Errorf("add output = %q", out)
 	}
-	if out := mustRun(t, "--repo", dir, "show", "1"); out != "#1 [todo] Write docs\n\n# Write docs\n\n## Steps\n- [ ] README\n" {
+	if out := mustRun(t, "--repo", dir, "show", "2"); out != "#2 [todo] Write docs (epic #1)\n\n# Write docs\n\n## Steps\n- [ ] README\n" {
 		t.Errorf("show output = %q", out)
 	}
 	if _, err := run(t, "--repo", dir, "show", "9"); err == nil {
@@ -91,17 +99,17 @@ func TestAddMarkdownBodyAndShow(t *testing.T) {
 }
 
 func TestAddReadsBodyFromStdin(t *testing.T) {
-	dir := setup(t)
+	dir := setupBoard(t)
 	skillContent = []byte("---\nname: agentboard\ndescription: Test skill\n---\n")
 	var out bytes.Buffer
 	cmd := newRootCmd("1.2.3")
 	cmd.SetOut(&out)
 	cmd.SetIn(strings.NewReader("# From stdin\n\nbody text\n"))
-	cmd.SetArgs([]string{"--repo", dir, "add", "-"})
+	cmd.SetArgs([]string{"--repo", dir, "add", "-", "-e", "1"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if got := mustRun(t, "--repo", dir, "show", "1"); got != "#1 [backlog] From stdin\n\n# From stdin\n\nbody text\n" {
+	if got := mustRun(t, "--repo", dir, "show", "2"); got != "#2 [backlog] From stdin (epic #1)\n\n# From stdin\n\nbody text\n" {
 		t.Errorf("show output = %q", got)
 	}
 }
@@ -123,14 +131,14 @@ func TestAddRejectsInvalidInput(t *testing.T) {
 }
 
 func TestLsHidesDoneByDefault(t *testing.T) {
-	dir := setup(t)
-	mustRun(t, "--repo", dir, "add", "open task", "-s", "doing")
-	mustRun(t, "--repo", dir, "add", "finished", "-s", "done")
+	dir := setupBoard(t)
+	mustRun(t, "--repo", dir, "add", "open task", "-s", "doing", "-e", "1")
+	mustRun(t, "--repo", dir, "add", "finished", "-s", "done", "-e", "1")
 
-	if out := mustRun(t, "--repo", dir, "ls"); out != "#1 [doing] open task\n" {
+	if out := mustRun(t, "--repo", dir, "ls"); out != "#2 [doing] open task (epic #1)\n" {
 		t.Errorf("ls = %q", out)
 	}
-	if out := mustRun(t, "--repo", dir, "ls", "-s", "done"); out != "#2 [done] finished\n" {
+	if out := mustRun(t, "--repo", dir, "ls", "-s", "done"); out != "#3 [done] finished (epic #1)\n#1 [done] [epic] [low] Test epic\n" {
 		t.Errorf("ls -s done = %q", out)
 	}
 	if _, err := run(t, "--repo", dir, "ls", "-s", "later"); err == nil {
@@ -139,60 +147,60 @@ func TestLsHidesDoneByDefault(t *testing.T) {
 }
 
 func TestLsIsolatesRepos(t *testing.T) {
-	a := setup(t)
+	a := setupBoard(t)
 	b := newDir(t)
-	mustRun(t, "--repo", a, "add", "in a")
+	mustRun(t, "--repo", a, "add", "in a", "-e", "1")
 	if out := mustRun(t, "--repo", b, "ls"); out != "" {
 		t.Errorf("ls in other repo = %q, want empty", out)
 	}
 }
 
 func TestRepoDefaultsToWorkingDirectory(t *testing.T) {
-	dir := setup(t)
+	dir := setupBoard(t)
 	t.Chdir(dir)
-	mustRun(t, "add", "from cwd")
-	if out := mustRun(t, "--repo", dir, "ls"); out != "#1 [backlog] from cwd\n" {
+	mustRun(t, "add", "from cwd", "-e", "1")
+	if out := mustRun(t, "--repo", dir, "ls"); out != "#2 [backlog] from cwd (epic #1)\n" {
 		t.Errorf("ls = %q", out)
 	}
 	// A relative --repo is resolved against the working directory.
-	if out := mustRun(t, "--repo", ".", "ls"); out != "#1 [backlog] from cwd\n" {
+	if out := mustRun(t, "--repo", ".", "ls"); out != "#2 [backlog] from cwd (epic #1)\n" {
 		t.Errorf("ls --repo . = %q", out)
 	}
 }
 
 func TestMvWithFrom(t *testing.T) {
-	dir := setup(t)
-	mustRun(t, "--repo", dir, "add", "claim me", "-s", "todo")
-	if out := mustRun(t, "--repo", dir, "mv", "1", "doing", "--from", "todo"); out != "#1 [doing] claim me\n" {
+	dir := setupBoard(t)
+	mustRun(t, "--repo", dir, "add", "claim me", "-s", "todo", "-e", "1")
+	if out := mustRun(t, "--repo", dir, "mv", "2", "doing", "--from", "todo"); out != "#2 [doing] claim me (epic #1)\n" {
 		t.Errorf("mv output = %q", out)
 	}
-	_, err := run(t, "--repo", dir, "mv", "1", "done", "--from", "todo")
+	_, err := run(t, "--repo", dir, "mv", "2", "done", "--from", "todo")
 	if err == nil || !strings.Contains(err.Error(), "doing") {
 		t.Errorf("conflict error = %v, want mention of current status", err)
 	}
-	if out := mustRun(t, "--repo", dir, "ls"); out != "#1 [doing] claim me\n" {
+	if out := mustRun(t, "--repo", dir, "ls"); out != "#2 [doing] claim me (epic #1)\n" {
 		t.Errorf("task changed after conflict: %q", out)
 	}
 }
 
 func TestEditReplacesBody(t *testing.T) {
-	dir := setup(t)
-	mustRun(t, "--repo", dir, "add", "old title", "-s", "todo")
-	if out := mustRun(t, "--repo", dir, "edit", "1", "# new title\n\nfindings"); out != "#1 [todo] new title\n" {
+	dir := setupBoard(t)
+	mustRun(t, "--repo", dir, "add", "old title", "-s", "todo", "-e", "1")
+	if out := mustRun(t, "--repo", dir, "edit", "2", "# new title\n\nfindings"); out != "#2 [todo] new title (epic #1)\n" {
 		t.Errorf("edit output = %q", out)
 	}
-	if _, err := run(t, "--repo", dir, "edit", "1"); err == nil {
+	if _, err := run(t, "--repo", dir, "edit", "2"); err == nil {
 		t.Error("edit without changes accepted")
 	}
-	if _, err := run(t, "--repo", dir, "edit", "1", " "); err == nil {
+	if _, err := run(t, "--repo", dir, "edit", "2", " "); err == nil {
 		t.Error("edit with blank body accepted")
 	}
 }
 
 func TestRmAndBadIDs(t *testing.T) {
-	dir := setup(t)
-	mustRun(t, "--repo", dir, "add", "remove me")
-	if out := mustRun(t, "--repo", dir, "rm", "1"); out != "deleted #1\n" {
+	dir := setupBoard(t)
+	mustRun(t, "--repo", dir, "add", "remove me", "-e", "1")
+	if out := mustRun(t, "--repo", dir, "rm", "2"); out != "deleted #2\n" {
 		t.Errorf("rm output = %q", out)
 	}
 	if out := mustRun(t, "--repo", dir, "ls"); out != "" {
@@ -202,7 +210,7 @@ func TestRmAndBadIDs(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"rm", "1"}, "not found"},
+		{[]string{"rm", "2"}, "not found"},
 		{[]string{"rm", "abc"}, "invalid task id"},
 		{[]string{"mv", "0", "done"}, "invalid task id"},
 		{[]string{"edit", "0", "# x"}, "invalid task id"},
@@ -215,33 +223,33 @@ func TestRmAndBadIDs(t *testing.T) {
 }
 
 func TestMergeFoldsSourceIntoTarget(t *testing.T) {
-	dir := setup(t)
-	mustRun(t, "--repo", dir, "add", "# Fix login", "-s", "todo")
-	mustRun(t, "--repo", dir, "add", "# Login broken\n\nsame bug")
-	if out := mustRun(t, "--repo", dir, "merge", "1", "2"); out != "merged #2 into #1\n#1 [todo] Fix login\n" {
+	dir := setupBoard(t)
+	mustRun(t, "--repo", dir, "add", "# Fix login", "-s", "todo", "-e", "1")
+	mustRun(t, "--repo", dir, "add", "# Login broken\n\nsame bug", "-e", "1")
+	if out := mustRun(t, "--repo", dir, "merge", "2", "3"); out != "merged #3 into #2\n#2 [todo] Fix login (epic #1)\n" {
 		t.Errorf("merge output = %q", out)
 	}
-	if out := mustRun(t, "--repo", dir, "show", "1"); out != "#1 [todo] Fix login\n\n# Fix login\n\n## Merged from #2: Login broken\n\nsame bug\n" {
+	if out := mustRun(t, "--repo", dir, "show", "2"); out != "#2 [todo] Fix login (epic #1)\n\n# Fix login\n\n## Merged from #3: Login broken\n\nsame bug\n" {
 		t.Errorf("show after merge = %q", out)
 	}
-	if out := mustRun(t, "--repo", dir, "ls"); out != "#1 [todo] Fix login\n" {
+	if out := mustRun(t, "--repo", dir, "ls"); out != "#2 [todo] Fix login (epic #1)\n" {
 		t.Errorf("ls after merge = %q", out)
 	}
 }
 
 func TestMergeReportsBadInput(t *testing.T) {
-	dir := setup(t)
-	mustRun(t, "--repo", dir, "add", "# target")
-	mustRun(t, "--repo", dir, "add", "# claimed", "-s", "doing")
+	dir := setupBoard(t)
+	mustRun(t, "--repo", dir, "add", "# target", "-e", "1")
+	mustRun(t, "--repo", dir, "add", "# claimed", "-s", "doing", "-e", "1")
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"merge", "1", "2"}, "#2 is in doing"},
-		{[]string{"merge", "1", "1"}, "into itself"},
-		{[]string{"merge", "1", "9"}, "not found"},
-		{[]string{"merge", "x", "2"}, "invalid task id"},
-		{[]string{"merge", "1"}, "accepts 2 arg"},
+		{[]string{"merge", "2", "3"}, "#3 is in doing"},
+		{[]string{"merge", "2", "2"}, "into itself"},
+		{[]string{"merge", "2", "9"}, "not found"},
+		{[]string{"merge", "x", "3"}, "invalid task id"},
+		{[]string{"merge", "2"}, "accepts 2 arg"},
 	} {
 		if _, err := run(t, append([]string{"--repo", dir}, tc.args...)...); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%v error = %v, want %q", tc.args, err, tc.want)
@@ -257,11 +265,10 @@ func TestEpicsAndPrioritiesFromTheCLI(t *testing.T) {
 	}{
 		{[]string{"add", "# Auth rewrite", "-k", "epic", "-p", "high"}, "#1 [backlog] [epic] [high] Auth rewrite\n"},
 		{[]string{"add", "# Login", "-e", "1", "-p", "low"}, "#2 [backlog] [low] Login (epic #1)\n"},
-		{[]string{"add", "# Unrelated", "-s", "todo"}, "#3 [todo] Unrelated\n"},
+		{[]string{"add", "# Unrelated", "-k", "epic", "-s", "todo"}, "#3 [todo] [epic] Unrelated\n"},
 		{[]string{"ls", "-e", "1"}, "#2 [backlog] [low] Login (epic #1)\n"},
 		{[]string{"edit", "2", "-p", "high"}, "#2 [backlog] [high] Login (epic #1)\n"},
-		{[]string{"edit", "2", "-e", "0"}, "#2 [backlog] [high] Login\n"},
-		{[]string{"edit", "2", "# Login page", "-e", "1"}, "#2 [backlog] [high] Login page (epic #1)\n"},
+		{[]string{"edit", "2", "# Login page", "-e", "3"}, "#2 [backlog] [high] Login page (epic #3)\n"},
 	} {
 		if out := mustRun(t, append([]string{"--repo", dir}, tc.args...)...); out != tc.want {
 			t.Errorf("%v = %q, want %q", tc.args, out, tc.want)
@@ -270,8 +277,8 @@ func TestEpicsAndPrioritiesFromTheCLI(t *testing.T) {
 }
 
 func TestEpicAndPriorityErrorsFromTheCLI(t *testing.T) {
-	dir := setup(t)
-	mustRun(t, "--repo", dir, "add", "# plain")
+	dir := setupBoard(t)
+	mustRun(t, "--repo", dir, "add", "# plain", "-e", "1")
 	for _, tc := range []struct {
 		args []string
 		want string
@@ -279,9 +286,9 @@ func TestEpicAndPriorityErrorsFromTheCLI(t *testing.T) {
 		{[]string{"add", "# x", "-k", "story"}, "invalid kind"},
 		{[]string{"add", "# x", "-p", "urgent"}, "invalid priority"},
 		{[]string{"add", "# x", "-e", "9"}, "not found"},
-		{[]string{"add", "# x", "-e", "1"}, "not an epic"},
-		{[]string{"edit", "1"}, "nothing to change"},
-		{[]string{"edit", "1", "-p", "urgent"}, "invalid priority"},
+		{[]string{"add", "# x", "-e", "2"}, "not an epic"},
+		{[]string{"edit", "2"}, "nothing to change"},
+		{[]string{"edit", "2", "-p", "urgent"}, "invalid priority"},
 	} {
 		if _, err := run(t, append([]string{"--repo", dir}, tc.args...)...); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%v error = %v, want %q", tc.args, err, tc.want)
@@ -290,10 +297,10 @@ func TestEpicAndPriorityErrorsFromTheCLI(t *testing.T) {
 }
 
 func TestMvIsRepoScoped(t *testing.T) {
-	a := setup(t)
+	a := setupBoard(t)
 	b := newDir(t)
-	mustRun(t, "--repo", a, "add", "in a")
-	if _, err := run(t, "--repo", b, "mv", "1", "done"); err == nil || !strings.Contains(err.Error(), "not found") {
+	mustRun(t, "--repo", a, "add", "in a", "-e", "1")
+	if _, err := run(t, "--repo", b, "mv", "2", "done"); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("cross-repo mv error = %v, want not found", err)
 	}
 }
@@ -316,8 +323,8 @@ func TestBoardRejectsNonLoopbackAddr(t *testing.T) {
 }
 
 func TestBoardServesUntilCanceled(t *testing.T) {
-	dir := setup(t)
-	mustRun(t, "--repo", dir, "add", "# served card")
+	dir := setupBoard(t)
+	mustRun(t, "--repo", dir, "add", "# served card", "-e", "1")
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -391,7 +398,8 @@ func TestDataDirDefaultsToHome(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 	dir := newDir(t)
-	mustRun(t, "--repo", dir, "add", "stored in home")
+	mustRun(t, "--repo", dir, "add", "# Test epic", "-k", "epic", "-s", "done", "-p", "low")
+	mustRun(t, "--repo", dir, "add", "stored in home", "-e", "1")
 	if _, err := os.Stat(filepath.Join(home, ".agentboard", "agentboard.db")); err != nil {
 		t.Errorf("database not in ~/.agentboard: %v", err)
 	}
@@ -401,4 +409,20 @@ func TestVersionFlag(t *testing.T) {
 	if out := mustRun(t, "--version"); !strings.Contains(out, "1.2.3") {
 		t.Errorf("--version = %q", out)
 	}
+}
+
+func TestTaskRequiresEpicFromCLI(t *testing.T) {
+	dir := setup(t)
+	if _, err := run(t, "--repo", dir, "add", "# Missing epic"); err == nil || !strings.Contains(err.Error(), "epic") {
+		t.Fatalf("missing epic error=%v", err)
+	}
+	mustRun(t, "--repo", dir, "add", "# Epic", "-k", "epic")
+	mustRun(t, "--repo", dir, "add", "# Child", "-e", "1")
+	for _, args := range [][]string{{"edit", "2", "-e", "0"}, {"rm", "1"}} {
+		if _, err := run(t, append([]string{"--repo", dir}, args...)...); err == nil {
+			t.Fatalf("%v accepted", args)
+		}
+	}
+	mustRun(t, "--repo", dir, "rm", "2")
+	mustRun(t, "--repo", dir, "rm", "1")
 }

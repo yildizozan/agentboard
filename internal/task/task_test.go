@@ -230,11 +230,11 @@ func TestTaskJSONIncludesKindPriorityAndEpic(t *testing.T) {
 }
 
 func TestDraftValidateDefaultsAndRejects(t *testing.T) {
-	d, err := Draft{Body: " plain title "}.Validate()
+	d, err := Draft{Body: " plain title ", EpicID: ptr(int64(3))}.Validate()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Body != "# plain title" || d.Status != Backlog || d.Kind != TaskKind || d.Priority != Normal || d.EpicID != nil {
+	if d.Body != "# plain title" || d.Status != Backlog || d.Kind != TaskKind || d.Priority != Normal || d.EpicID == nil || *d.EpicID != 3 {
 		t.Errorf("defaults = %+v", d)
 	}
 	epic := int64(3)
@@ -257,8 +257,8 @@ func TestDraftValidateDefaultsAndRejects(t *testing.T) {
 func TestPatchValidatesPriorityAndEpic(t *testing.T) {
 	for name, p := range map[string]Patch{
 		"priority only": {Priority: ptr(High)},
-		"unlink epic":   {Epic: ptr(int64(0))},
-		"link epic":     {Epic: ptr(int64(3))},
+
+		"link epic": {Epic: ptr(int64(3))},
 	} {
 		if _, err := p.Validate(); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -271,5 +271,31 @@ func TestPatchValidatesPriorityAndEpic(t *testing.T) {
 		if _, err := p.Validate(); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: error = %v, want ErrInvalid", name, err)
 		}
+	}
+}
+
+func TestTaskDraftRequiresEpic(t *testing.T) {
+	for name, d := range map[string]Draft{
+		"default task":  {Body: "# Task"},
+		"explicit task": {Body: "# Task", Kind: TaskKind},
+		"zero epic":     {Body: "# Task", EpicID: ptr(int64(0))},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := d.Validate(); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("Validate = %v, want validation error", err)
+			}
+		})
+	}
+	if _, err := (Draft{Body: "# Epic", Kind: EpicKind}).Validate(); err != nil {
+		t.Fatalf("top-level epic rejected: %v", err)
+	}
+	if _, err := (Draft{Body: "# Task", EpicID: ptr(int64(3))}).Validate(); err != nil {
+		t.Fatalf("linked task rejected: %v", err)
+	}
+}
+
+func TestPatchCannotRemoveEpic(t *testing.T) {
+	if _, err := (Patch{Epic: ptr(int64(0))}).Validate(); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unlink error = %v, want validation error", err)
 	}
 }

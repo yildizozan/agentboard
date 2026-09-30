@@ -104,11 +104,15 @@ func TestBuiltBinaryServesMCPOverStdio(t *testing.T) {
 		t.Errorf("server info = %+v, want agentboard 9.9.9", info)
 	}
 	cwd := t.TempDir()
-	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "task_add", Arguments: map[string]any{"cwd": cwd, "body": "# over stdio"}})
+	epic, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "task_add", Arguments: map[string]any{"cwd": cwd, "body": "# Stdio epic", "kind": "epic"}})
+	if err != nil || epic.IsError {
+		t.Fatalf("add epic: %+v %v", epic, err)
+	}
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "task_add", Arguments: map[string]any{"cwd": cwd, "body": "# over stdio", "epic": 1}})
 	if err != nil || res.IsError {
 		t.Fatalf("task_add = %+v, %v", res, err)
 	}
-	if text := res.Content[0].(*mcp.TextContent).Text; !strings.HasSuffix(text, "[backlog] over stdio") {
+	if text := res.Content[0].(*mcp.TextContent).Text; !strings.HasSuffix(text, "[backlog] over stdio (epic #1)") {
 		t.Errorf("task_add = %q", text)
 	}
 }

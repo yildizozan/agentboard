@@ -87,7 +87,7 @@ type Task struct {
 	Status    Status    `json:"status"`
 	Kind      Kind      `json:"kind"`
 	Priority  Priority  `json:"priority"`
-	EpicID    *int64    `json:"epicId"` // the epic this task belongs to; nil for none
+	EpicID    *int64    `json:"epicId"` // the epic this task belongs to; nil for an epic
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -193,15 +193,33 @@ func (d Draft) Validate() (Draft, error) {
 	if d.Priority, err = parseOr(d.Priority, Normal, ParsePriority); err != nil {
 		return Draft{}, err
 	}
-	if d.EpicID != nil {
-		if *d.EpicID <= 0 {
-			return Draft{}, Invalidf("invalid epic id %d", *d.EpicID)
-		}
-		if d.Kind == EpicKind {
-			return Draft{}, ErrNestedEpic
-		}
+	if err := ValidateEpic(d.Kind, d.EpicID); err != nil {
+		return Draft{}, err
 	}
 	return d, nil
+}
+
+// ErrEpicRequired is returned when a task has no parent epic.
+var ErrEpicRequired error = invalidError{msg: "a task must belong to an epic"}
+
+// ErrEpicHasTasks is returned when deleting an epic would leave its tasks without a parent.
+var ErrEpicHasTasks error = invalidError{msg: "epic still has tasks: move or delete them first"}
+
+// ValidateEpic checks the parent rule; the store checks existence and board membership.
+func ValidateEpic(kind Kind, epicID *int64) error {
+	if kind == EpicKind {
+		if epicID != nil {
+			return ErrNestedEpic
+		}
+		return nil
+	}
+	if epicID == nil || *epicID == 0 {
+		return ErrEpicRequired
+	}
+	if *epicID < 0 {
+		return Invalidf("invalid epic id %d", *epicID)
+	}
+	return nil
 }
 
 // ErrNestedEpic is returned when an epic would be put into another epic.
@@ -217,7 +235,7 @@ func parseOr[T ~string](v, def T, parse func(string) (T, error)) (T, error) {
 
 // Patch describes a change to a task; nil fields stay unchanged.
 // When From is set the change applies only if the task is currently in From (compare-and-swap).
-// Epic links the task to that epic; 0 removes the link.
+// Epic moves the task to another epic; it must be a positive id.
 type Patch struct {
 	Body     *string   `json:"body,omitempty"`
 	Status   *Status   `json:"status,omitempty"`
@@ -235,6 +253,9 @@ func (p Patch) Validate() (Patch, error) {
 		if _, err := ParsePriority(string(*p.Priority)); err != nil {
 			return Patch{}, err
 		}
+	}
+	if p.Epic != nil && *p.Epic == 0 {
+		return Patch{}, ErrEpicRequired
 	}
 	if p.Epic != nil && *p.Epic < 0 {
 		return Patch{}, Invalidf("invalid epic id %d", *p.Epic)

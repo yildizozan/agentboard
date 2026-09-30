@@ -35,7 +35,7 @@ export interface Patch {
   status?: Status
   from?: Status
   priority?: Priority
-  epic?: number // 0 removes the epic link
+  epic?: number // a positive id moves a task to another epic
 }
 
 export interface Draft {

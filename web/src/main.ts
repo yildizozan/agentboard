@@ -286,17 +286,17 @@ function edit(heading: string, body: string, submitLabel: string, fields: Editor
 }
 
 function addTask() {
-  const fields = { kind: 'task' as const, priority: 'normal', priorities: state.board?.priorities ?? [], epic: null, epics: epics() }
+  const fields = { kind: epics().length ? 'task' as const : 'epic' as const, priority: 'normal', priorities: state.board?.priorities ?? [], epic: null, epics: epics() }
   edit('New task', '', 'Add to backlog', fields, (v) =>
-    api.create(state.repo, { body: v.body, kind: v.kind, priority: v.priority, epic: v.epic ?? 0 }))
+    api.create(state.repo, { body: v.body, kind: v.kind, priority: v.priority, ...(v.kind === 'epic' ? {} : { epic: v.epic! }) }))
 }
 
 function editTask(t: Task) {
   // An epic cannot belong to an epic, so its epic select stays empty.
-  const fields = { priority: t.priority, priorities: state.board?.priorities ?? [], epic: t.epicId,
+  const fields = { cardKind: t.kind, priority: t.priority, priorities: state.board?.priorities ?? [], epic: t.epicId,
     epics: t.kind === 'epic' ? [] : epics().filter((e) => e.id !== t.id) }
   edit(`Edit #${t.id}`, t.body, 'Save', fields, (v) =>
-    api.patch(state.repo, t.id, { body: v.body, priority: v.priority, epic: v.epic ?? 0 }))
+    api.patch(state.repo, t.id, { body: v.body, priority: v.priority, ...(t.kind === 'epic' ? {} : { epic: v.epic! }) }))
 }
 
 function openDetail(id: number) {

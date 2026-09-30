@@ -107,7 +107,7 @@ describe('openEditor', () => {
     expect(select('Kind')).toBeNull() // the kind is chosen only for new cards
     expect([...select('Priority')!.options].map((o) => o.value)).toEqual(['low', 'normal', 'high'])
     expect(select('Priority')!.value).toBe('normal')
-    expect([...select('Epic')!.options].map((o) => o.textContent)).toEqual(['No epic', '#3 Auth rewrite', '#9 Billing'])
+    expect([...select('Epic')!.options].map((o) => o.textContent)).toEqual(['Select an epic', '#3 Auth rewrite', '#9 Billing'])
     expect(select('Epic')!.value).toBe('3')
 
     select('Priority')!.value = 'high'
@@ -115,14 +115,6 @@ describe('openEditor', () => {
     buttonNamed('Add').click()
     await flush()
     expect(save).toHaveBeenCalledWith({ body: '# Draft\n\nmore', priority: 'high', epic: 9 })
-  })
-
-  it('saves no epic as null', async () => {
-    const { save } = open(undefined, undefined, { priority: 'low', priorities: ['low', 'normal', 'high'], epic: null, epics })
-    expect(select('Epic')!.value).toBe('')
-    buttonNamed('Add').click()
-    await flush()
-    expect(save).toHaveBeenCalledWith({ body: '# Draft\n\nmore', priority: 'low', epic: null })
   })
 
   it('lets a new card be an epic, which cannot belong to an epic', async () => {
@@ -136,4 +128,39 @@ describe('openEditor', () => {
     expect(save).toHaveBeenCalledWith({ body: '# Draft\n\nmore', kind: 'epic', priority: 'normal', epic: null })
   })
 
+})
+
+
+describe('mandatory epic', () => {
+  it('keeps a task unsaved until an epic is selected', async () => {
+    const { save } = open(undefined, undefined, { kind: 'task', priority: 'normal', priorities: ['normal'], epic: null, epics })
+    expect(select('Epic')!.required).toBe(true)
+    expect(select('Epic')!.checkValidity()).toBe(false)
+    buttonNamed('Add').click()
+    await flush()
+    expect(dialog.open).toBe(true)
+    expect(save).not.toHaveBeenCalled()
+    select('Epic')!.value = '3'
+    buttonNamed('Add').click()
+    await flush()
+    expect(dialog.open).toBe(false)
+    expect(save).toHaveBeenCalledWith({ body: '# Draft\n\nmore', kind: 'task', priority: 'normal', epic: 3 })
+  })
+  it('allows creating a top-level epic when no epic exists', async () => {
+    const { save } = open(undefined, undefined, { kind: 'epic', priority: 'normal', priorities: ['normal'], epic: null, epics: [] })
+    expect(select('Epic')!.disabled).toBe(true)
+    buttonNamed('Add').click()
+    await flush()
+    expect(dialog.open).toBe(false)
+    expect(save).toHaveBeenCalledWith({ body: '# Draft\n\nmore', kind: 'epic', priority: 'normal', epic: null })
+  })
+  it('keeps an existing epic editable without a parent', async () => {
+    const { save } = open(undefined, undefined, { cardKind: 'epic', priority: 'normal', priorities: ['normal'], epic: null, epics: [] })
+    expect(select('Kind')).toBeNull()
+    expect(select('Epic')!.disabled).toBe(true)
+    buttonNamed('Add').click()
+    await flush()
+    expect(dialog.open).toBe(false)
+    expect(save).toHaveBeenCalledOnce()
+  })
 })

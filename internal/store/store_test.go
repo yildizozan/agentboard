@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -24,11 +25,29 @@ func openTemp(t *testing.T) (*Store, string) {
 
 func mustAdd(t *testing.T, s *Store, repo, body string, status task.Status) task.Task {
 	t.Helper()
-	tk, err := s.Add(context.Background(), repo, task.Draft{Body: body, Status: status})
+	tk, err := s.Add(context.Background(), repo, task.Draft{Body: body, Status: status, EpicID: ptr(fixtureEpic(t, s, repo))})
 	if err != nil {
 		t.Fatalf("Add(%q): %v", body, err)
 	}
 	return tk
+}
+
+// fixtureEpic creates the parent required by ordinary task fixtures, once per repo.
+func fixtureEpic(t *testing.T, s *Store, repo string) int64 {
+	t.Helper()
+	var id int64
+	err := s.db.QueryRow(`SELECT id FROM tasks WHERE repo = ? AND kind = 'epic' AND body = '# Test epic'`, repo).Scan(&id)
+	if err == nil {
+		return id
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal(err)
+	}
+	epic, err := s.Add(context.Background(), repo, task.Draft{Body: "# Test epic", Kind: task.EpicKind, Status: task.Done, Priority: task.Low})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return epic.ID
 }
 
 func TestReopenKeepsTasks(t *testing.T) {
@@ -42,8 +61,8 @@ func TestReopenKeepsTasks(t *testing.T) {
 	}
 	defer s2.Close()
 	got, err := s2.List(context.Background(), "/r", Filter{})
-	if err != nil || len(got) != 1 {
-		t.Fatalf("List after reopen = %v, %v; want 1 task", got, err)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("List after reopen = %v, %v; want a task and its epic", got, err)
 	}
 }
 
@@ -60,7 +79,7 @@ func TestOpenUsesWAL(t *testing.T) {
 
 func TestAddReturnsStoredTask(t *testing.T) {
 	s, _ := openTemp(t)
-	tk, err := s.Add(context.Background(), "/r", task.Draft{Body: "  Fix login  \n\ndetails\n", Status: task.Todo})
+	tk, err := s.Add(context.Background(), "/r", task.Draft{Body: "  Fix login  \n\ndetails\n", Status: task.Todo, EpicID: ptr(fixtureEpic(t, s, "/r"))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +114,7 @@ func TestListIsolatesRepos(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Title() != "in a" {
+	if len(got) != 2 || got[0].Title() != "in a" {
 		t.Errorf("List(/a) = %v", got)
 	}
 }
@@ -113,7 +132,7 @@ func TestListFiltersAndOrders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertIDs(t, all, backlog.ID, todo1.ID, todo2.ID, doing.ID, done.ID)
+	assertIDs(t, all, backlog.ID, todo1.ID, todo2.ID, doing.ID, done.ID, fixtureEpic(t, s, "/r"))
 
 	active, err := s.List(ctx, "/r", Filter{Statuses: task.ActiveStatuses()})
 	if err != nil {
@@ -125,7 +144,7 @@ func TestListFiltersAndOrders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertIDs(t, onlyDone, done.ID)
+	assertIDs(t, onlyDone, done.ID, fixtureEpic(t, s, "/r"))
 }
 
 func assertIDs(t *testing.T, got []task.Task, want ...int64) {
@@ -165,12 +184,13 @@ func TestConcurrentWritersAcrossStores(t *testing.T) {
 		t.Cleanup(func() { s.Close() })
 	}
 
+	epicID := fixtureEpic(t, opened[0], "/r")
 	for i, s := range opened {
 		for j := range writers {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if _, err := s.Add(context.Background(), "/r", task.Draft{Body: fmt.Sprintf("s%d-w%d", i, j), Status: task.Todo}); err != nil {
+				if _, err := s.Add(context.Background(), "/r", task.Draft{Body: fmt.Sprintf("s%d-w%d", i, j), Status: task.Todo, EpicID: &epicID}); err != nil {
 					errs <- err
 				}
 			}()
@@ -183,8 +203,8 @@ func TestConcurrentWritersAcrossStores(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != stores*writers {
-		t.Errorf("stored %d tasks, want %d", len(got), stores*writers)
+	if len(got) != stores*writers+1 {
+		t.Errorf("stored %d tasks, want %d", len(got), stores*writers+1)
 	}
 }
 
@@ -319,7 +339,7 @@ func TestRepos(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []RepoSummary{{Path: "/a", Count: 2}, {Path: "/b", Count: 1}}
+	want := []RepoSummary{{Path: "/a", Count: 3}, {Path: "/b", Count: 2}}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("Repos = %v, want %v", got, want)
 	}
@@ -433,6 +453,9 @@ func TestMergeRejectsSelfMissingAndOtherRepo(t *testing.T) {
 // addDraft adds d to repo and fails the test on error.
 func addDraft(t *testing.T, s *Store, repo string, d task.Draft) task.Task {
 	t.Helper()
+	if d.Kind != task.EpicKind && d.EpicID == nil {
+		d.EpicID = ptr(fixtureEpic(t, s, repo))
+	}
 	tk, err := s.Add(context.Background(), repo, d)
 	if err != nil {
 		t.Fatalf("Add(%+v): %v", d, err)
@@ -453,7 +476,7 @@ func TestAddStoresKindPriorityAndEpic(t *testing.T) {
 		priority task.Priority
 		epic     *int64
 	}{
-		{plain, task.TaskKind, task.Normal, nil},
+		{plain, task.TaskKind, task.Normal, plain.EpicID},
 		{epic, task.EpicKind, task.High, nil},
 		{child, task.TaskKind, task.Low, &epic.ID},
 	} {
@@ -501,27 +524,23 @@ func TestEpicLinksMustNameAnEpicOfTheSameBoard(t *testing.T) {
 	if _, err := s.Update(ctx, "/r", epic.ID, task.Patch{Epic: &other.ID}); !errors.Is(err, task.ErrNestedEpic) {
 		t.Errorf("epic into epic: error = %v, want ErrNestedEpic", err)
 	}
-	if got, _ := s.Get(ctx, "/r", plain.ID); got.EpicID != nil {
+	if got, _ := s.Get(ctx, "/r", plain.ID); !sameEpic(got.EpicID, plain.EpicID) {
 		t.Errorf("refused links changed the task: %+v", got)
 	}
 }
 
-func TestUpdateLinksUnlinksAndReprioritizes(t *testing.T) {
+func TestUpdateMovesToAnotherEpicAndReprioritizes(t *testing.T) {
 	s, _ := openTemp(t)
 	ctx := context.Background()
-	epic := addDraft(t, s, "/r", task.Draft{Body: "# epic", Kind: task.EpicKind})
-	tk := addDraft(t, s, "/r", task.Draft{Body: "# task"})
-
-	got, err := s.Update(ctx, "/r", tk.ID, task.Patch{Epic: &epic.ID, Priority: ptr(task.High)})
-	if err != nil || !sameEpic(got.EpicID, &epic.ID) || got.Priority != task.High || got.Body != "# task" {
-		t.Fatalf("link = %+v, %v", got, err)
+	first := addDraft(t, s, "/r", task.Draft{Body: "# First", Kind: task.EpicKind})
+	second := addDraft(t, s, "/r", task.Draft{Body: "# Second", Kind: task.EpicKind})
+	tk := addDraft(t, s, "/r", task.Draft{Body: "# task", EpicID: &first.ID})
+	got, err := s.Update(ctx, "/r", tk.ID, task.Patch{Epic: &second.ID, Priority: ptr(task.High)})
+	if err != nil || !sameEpic(got.EpicID, &second.ID) || got.Priority != task.High || got.Body != "# task" {
+		t.Fatalf("move = %+v, %v", got, err)
 	}
-	got, err = s.Update(ctx, "/r", tk.ID, task.Patch{Epic: ptr(int64(0))})
-	if err != nil || got.EpicID != nil || got.Priority != task.High {
-		t.Fatalf("unlink = %+v, %v", got, err)
-	}
-	if stored, _ := s.Get(ctx, "/r", tk.ID); stored.EpicID != nil || stored.Priority != task.High {
-		t.Errorf("stored after unlink = %+v", stored)
+	if stored, err := s.Get(ctx, "/r", tk.ID); err != nil || !sameEpic(stored.EpicID, &second.ID) || stored.Priority != task.High {
+		t.Fatalf("stored = %+v, %v", stored, err)
 	}
 }
 
@@ -537,7 +556,7 @@ func TestListOrdersByPriorityWithinStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertIDs(t, got, backlogHigh.ID, high.ID, high2.ID, normal.ID, low.ID, doingLow.ID)
+	assertIDs(t, got, backlogHigh.ID, high.ID, high2.ID, normal.ID, low.ID, doingLow.ID, fixtureEpic(t, s, "/r"))
 }
 
 func TestListFiltersByEpic(t *testing.T) {
@@ -556,19 +575,6 @@ func TestListFiltersByEpic(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertIDs(t, active, a.ID)
-}
-
-func TestDeletingAnEpicUnlinksItsTasks(t *testing.T) {
-	s, _ := openTemp(t)
-	ctx := context.Background()
-	epic := addDraft(t, s, "/r", task.Draft{Body: "# epic", Kind: task.EpicKind})
-	child := addDraft(t, s, "/r", task.Draft{Body: "# child", EpicID: &epic.ID})
-	if err := s.Delete(ctx, "/r", epic.ID); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.Get(ctx, "/r", child.ID); err != nil || got.EpicID != nil {
-		t.Errorf("child after epic delete = %+v, %v; want it kept without an epic", got, err)
-	}
 }
 
 func TestMergingEpicsMovesTheirTasks(t *testing.T) {
