@@ -50,6 +50,12 @@ type updateInput struct {
 	Body string `json:"body" jsonschema:"new card content; replaces the whole body"`
 }
 
+type mergeInput struct {
+	cwdInput
+	ID     int64 `json:"id" jsonschema:"target task id; it keeps its title and status"`
+	Source int64 `json:"source" jsonschema:"task id to fold into the target; it is deleted"`
+}
+
 // idInput selects one task; task_get and task_delete share it.
 type idInput struct {
 	cwdInput
@@ -86,6 +92,12 @@ func New(s *store.Store, version string) *mcp.Server {
 		Description: "Replace a task's body, for example to record findings, blockers or a narrowed scope. " +
 			"Read it with task_get first and send the whole new body. body: " + bodyGuide + ". Status changes use task_move.",
 	}, h.update)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "task_merge",
+		Description: "Merge task source into task id on the board at cwd, e.g. to remove a duplicate or to collect related work. " +
+			"The source's body is appended to the target as a \"## Merged from #<source>\" section and the source is deleted permanently. " +
+			"A source in doing is refused, since an agent may be working on it. Afterwards read the target with task_get and tidy it with task_update.",
+	}, h.merge)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "task_delete",
 		Description: "Delete a task permanently. Prefer moving finished work to done; delete only tasks created by mistake.",
@@ -185,6 +197,18 @@ func (h handlers) patch(ctx context.Context, cwd string, id int64, p task.Patch)
 		return nil, nil, err
 	}
 	return text(tk.String()), nil, nil
+}
+
+func (h handlers) merge(ctx context.Context, _ *mcp.CallToolRequest, in mergeInput) (*mcp.CallToolResult, any, error) {
+	repoKey, err := resolve(in.Cwd)
+	if err != nil {
+		return nil, nil, err
+	}
+	tk, err := h.store.Merge(ctx, repoKey, in.ID, in.Source)
+	if err != nil {
+		return nil, nil, err
+	}
+	return text(task.MergedLine(in.Source, tk)), nil, nil
 }
 
 func (h handlers) delete(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, any, error) {

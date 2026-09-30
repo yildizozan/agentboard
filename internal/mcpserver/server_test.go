@@ -99,7 +99,7 @@ func TestListToolsExposesCwdAndSchemas(t *testing.T) {
 			t.Errorf("%s has no description", tool.Name)
 		}
 	}
-	for _, want := range []string{"task_add", "task_list", "task_get", "task_move", "task_update", "task_delete"} {
+	for _, want := range []string{"task_add", "task_list", "task_get", "task_move", "task_update", "task_merge", "task_delete"} {
 		if !slices.Contains(names, want) {
 			t.Errorf("tool %s missing from %v", want, names)
 		}
@@ -198,6 +198,7 @@ func TestOneServerServesSeveralReposWithoutLeaks(t *testing.T) {
 		"task_get":    {"cwd": b, "id": 1},
 		"task_update": {"cwd": b, "id": 1, "body": "hijacked"},
 		"task_delete": {"cwd": b, "id": 1},
+		"task_merge":  {"cwd": b, "id": 2, "source": 1},
 	} {
 		if out, isErr := call(t, cs, name, args); !isErr || !strings.Contains(out, "not found") {
 			t.Errorf("%s on other repo's task = %q (isError=%v), want not found", name, out, isErr)
@@ -208,5 +209,32 @@ func TestOneServerServesSeveralReposWithoutLeaks(t *testing.T) {
 	}
 	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": b}); out != "#2 [backlog] in b" {
 		t.Errorf("repo b = %q", out)
+	}
+}
+
+func TestMergeFoldsSourceIntoTarget(t *testing.T) {
+	cs := connect(t)
+	dir := workDir(t)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Fix login", "status": "todo"})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Login broken\n\n## Context\nsame bug"})
+	if out := mustCall(t, cs, "task_merge", map[string]any{"cwd": dir, "id": 1, "source": 2}); out != "merged #2 into #1\n#1 [todo] Fix login" {
+		t.Errorf("task_merge = %q", out)
+	}
+	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 1}); out != "#1 [todo] Fix login\n\n# Fix login\n\n## Merged from #2: Login broken\n\n### Context\nsame bug" {
+		t.Errorf("task_get after merge = %q", out)
+	}
+	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir}); out != "#1 [todo] Fix login" {
+		t.Errorf("task_list after merge = %q", out)
+	}
+}
+
+func TestMergeRefusesDoingSource(t *testing.T) {
+	cs := connect(t)
+	dir := workDir(t)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# target"})
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# claimed", "status": "doing"})
+	out, isErr := call(t, cs, "task_merge", map[string]any{"cwd": dir, "id": 1, "source": 2})
+	if !isErr || !strings.Contains(out, "#2 is in doing") {
+		t.Errorf("merge of doing source = %q (isError=%v), want conflict", out, isErr)
 	}
 }

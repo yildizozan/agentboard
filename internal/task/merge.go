@@ -58,3 +58,8 @@ func fenceMarker(line string) string {
 	}
 	return ""
 }
+
+// MergedLine reports a merge in the CLI and MCP output: "merged #7 into #3" and the target's line.
+func MergedLine(sourceID int64, target Task) string {
+	return fmt.Sprintf("merged #%d into #%d\n%s", sourceID, target.ID, target)
+}
