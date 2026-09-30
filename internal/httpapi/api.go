@@ -35,13 +35,17 @@ type repoJSON struct {
 }
 
 type tasksJSON struct {
-	Statuses []task.Status `json:"statuses"`
-	Tasks    []task.Task   `json:"tasks"`
+	Statuses   []task.Status   `json:"statuses"`
+	Priorities []task.Priority `json:"priorities"`
+	Tasks      []task.Task     `json:"tasks"`
 }
 
 type createJSON struct {
-	Body   string      `json:"body"`
-	Status task.Status `json:"status"`
+	Body     string        `json:"body"`
+	Status   task.Status   `json:"status"`
+	Kind     task.Kind     `json:"kind"`
+	Priority task.Priority `json:"priority"`
+	Epic     int64         `json:"epic"` // 0 for none
 }
 
 type mergeJSON struct {
@@ -162,7 +166,7 @@ func (a api) listTasks(w http.ResponseWriter, r *http.Request) {
 	if tasks == nil {
 		tasks = []task.Task{}
 	}
-	writeJSON(w, http.StatusOK, tasksJSON{Statuses: task.Statuses(), Tasks: tasks})
+	writeJSON(w, http.StatusOK, tasksJSON{Statuses: task.Statuses(), Priorities: task.Priorities(), Tasks: tasks})
 }
 
 func (a api) createTask(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +180,11 @@ func (a api) createTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	tk, err := a.store.Add(r.Context(), repo, task.Draft{Body: in.Body, Status: in.Status})
+	d := task.Draft{Body: in.Body, Status: in.Status, Kind: in.Kind, Priority: in.Priority}
+	if in.Epic != 0 {
+		d.EpicID = &in.Epic
+	}
+	tk, err := a.store.Add(r.Context(), repo, d)
 	if err != nil {
 		writeError(w, err)
 		return

@@ -187,6 +187,52 @@ func TestMergeTask(t *testing.T) {
 	expectStatus(t, e.do(t, "POST", mergeURL(target.ID, repoA), `{"src":1}`), 400)
 }
 
+func TestCreateAndPatchEpicsAndPriorities(t *testing.T) {
+	e := newEnv(t, nil)
+	rec := e.do(t, "POST", tasksURL(repoA), `{"body":"# Auth rewrite","kind":"epic","priority":"high"}`)
+	expectStatus(t, rec, 201)
+	epic := decode[map[string]any](t, rec)
+	if epic["kind"] != "epic" || epic["priority"] != "high" || epic["epicId"] != nil {
+		t.Errorf("epic = %+v", epic)
+	}
+	epicID := jsonNumber(int64(epic["id"].(float64)))
+
+	rec = e.do(t, "POST", tasksURL(repoA), `{"body":"# Login","epic":`+epicID+`}`)
+	expectStatus(t, rec, 201)
+	child := decode[map[string]any](t, rec)
+	if child["kind"] != "task" || child["priority"] != "normal" || child["epicId"] != epic["id"] {
+		t.Errorf("child = %+v", child)
+	}
+	childID := int64(child["id"].(float64))
+
+	rec = e.do(t, "PATCH", taskURL(childID, repoA), `{"priority":"low","epic":0}`)
+	expectStatus(t, rec, 200)
+	if got := decode[map[string]any](t, rec); got["priority"] != "low" || got["epicId"] != nil {
+		t.Errorf("patched = %+v", got)
+	}
+
+	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `{"body":"# x","kind":"story"}`), 400)
+	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `{"body":"# x","priority":"urgent"}`), 400)
+	expectStatus(t, e.do(t, "POST", tasksURL(repoA), `{"body":"# x","epic":`+jsonNumber(childID)+`}`), 400)
+	expectStatus(t, e.do(t, "POST", tasksURL(repoB), `{"body":"# x","epic":`+epicID+`}`), 404)
+	expectStatus(t, e.do(t, "PATCH", taskURL(childID, repoA), `{"priority":"urgent"}`), 400)
+}
+
+func TestListTasksIncludesPrioritiesInOrder(t *testing.T) {
+	e := newEnv(t, nil)
+	rec := e.do(t, "GET", tasksURL(repoA), "")
+	expectStatus(t, rec, 200)
+	var got struct {
+		Priorities []string `json:"priorities"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got.Priorities, ",") != "low,normal,high" {
+		t.Errorf("priorities = %v", got.Priorities)
+	}
+}
+
 func TestDeleteTask(t *testing.T) {
 	e := newEnv(t, nil)
 	tk := e.add(t, repoA, "card", task.Todo)
