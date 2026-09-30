@@ -238,3 +238,66 @@ func TestMergeRefusesDoingSource(t *testing.T) {
 		t.Errorf("merge of doing source = %q (isError=%v), want conflict", out, isErr)
 	}
 }
+
+func TestEpicsPrioritiesAndEpicFilter(t *testing.T) {
+	cs := connect(t)
+	dir := workDir(t)
+	if out := mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Auth rewrite", "kind": "epic", "priority": "high"}); out != "#1 [backlog] [epic] [high] Auth rewrite" {
+		t.Errorf("add epic = %q", out)
+	}
+	if out := mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Login", "epic": 1, "priority": "low"}); out != "#2 [backlog] [low] Login (epic #1)" {
+		t.Errorf("add linked task = %q", out)
+	}
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Unrelated"})
+	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir, "epic": 1}); out != "#2 [backlog] [low] Login (epic #1)" {
+		t.Errorf("task_list epic 1 = %q", out)
+	}
+	if out := mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 2, "priority": "high"}); out != "#2 [backlog] [high] Login (epic #1)" {
+		t.Errorf("reprioritize = %q", out)
+	}
+	if out := mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 2, "epic": 0}); out != "#2 [backlog] [high] Login" {
+		t.Errorf("unlink = %q", out)
+	}
+	if out := mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 2, "epic": 1}); out != "#2 [backlog] [high] Login (epic #1)" {
+		t.Errorf("relink = %q", out)
+	}
+}
+
+func TestEpicAndPriorityErrorsAreToolErrors(t *testing.T) {
+	cs := connect(t)
+	dir := workDir(t)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# plain"})
+	for name, args := range map[string]map[string]any{
+		"unknown kind":     {"cwd": dir, "body": "# x", "kind": "story"},
+		"unknown priority": {"cwd": dir, "body": "# x", "priority": "urgent"},
+		"link to non-epic": {"cwd": dir, "body": "# x", "epic": 1},
+		"missing epic":     {"cwd": dir, "body": "# x", "epic": 99},
+		"epic in epic":     {"cwd": dir, "body": "# x", "kind": "epic", "epic": 1},
+	} {
+		if out, isErr := call(t, cs, "task_add", args); !isErr {
+			t.Errorf("%s: task_add = %q, want tool error", name, out)
+		}
+	}
+}
+
+func TestUpdateNeedsOnlyTheFieldsItChanges(t *testing.T) {
+	cs := connect(t)
+	res, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range res.Tools {
+		if tool.Name != "task_update" {
+			continue
+		}
+		raw, _ := json.Marshal(tool.InputSchema)
+		var schema struct {
+			Required []string `json:"required"`
+		}
+		json.Unmarshal(raw, &schema)
+		slices.Sort(schema.Required)
+		if !slices.Equal(schema.Required, []string{"cwd", "id"}) {
+			t.Errorf("task_update required = %v, want [cwd id]", schema.Required)
+		}
+	}
+}

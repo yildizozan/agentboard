@@ -21,6 +21,10 @@ const statusGuide = "Statuses: backlog = idea or later work, not planned yet; to
 const bodyGuide = `Markdown body; the first line must be the "# <title>" heading (a plain first line becomes it), ` +
 	`e.g. "# Fix login bug\n\n## Context\n...\n\n## Steps\n- [ ] ..."`
 
+// epicGuide explains epics and priorities once for every tool that sets them.
+const epicGuide = "Kinds: task (default) or epic; an epic groups the tasks of a larger piece of work, and a task " +
+	"belongs to at most one epic (epics cannot be nested). Priorities: low, normal (default) or high; columns list high first."
+
 // cwdInput is embedded in every tool input: the board is chosen per call from the agent's cwd.
 type cwdInput struct {
 	Cwd string `json:"cwd" jsonschema:"absolute path of your current working directory; selects the repository's board"`
@@ -28,13 +32,17 @@ type cwdInput struct {
 
 type addInput struct {
 	cwdInput
-	Body   string `json:"body" jsonschema:"card content"`
-	Status string `json:"status,omitempty" jsonschema:"initial status: backlog (default), todo, doing or done"`
+	Body     string `json:"body" jsonschema:"card content"`
+	Status   string `json:"status,omitempty" jsonschema:"initial status: backlog (default), todo, doing or done"`
+	Kind     string `json:"kind,omitempty" jsonschema:"task (default) or epic"`
+	Priority string `json:"priority,omitempty" jsonschema:"low, normal (default) or high"`
+	Epic     int64  `json:"epic,omitempty" jsonschema:"id of the epic this task belongs to"`
 }
 
 type listInput struct {
 	cwdInput
 	Status string `json:"status,omitempty" jsonschema:"only list this status; by default every status except done"`
+	Epic   int64  `json:"epic,omitempty" jsonschema:"only list the tasks of this epic"`
 }
 
 type moveInput struct {
@@ -46,8 +54,10 @@ type moveInput struct {
 
 type updateInput struct {
 	cwdInput
-	ID   int64  `json:"id" jsonschema:"task id"`
-	Body string `json:"body" jsonschema:"new card content; replaces the whole body"`
+	ID       int64   `json:"id" jsonschema:"task id"`
+	Body     *string `json:"body,omitempty" jsonschema:"new card content; replaces the whole body"`
+	Priority *string `json:"priority,omitempty" jsonschema:"new priority: low, normal or high"`
+	Epic     *int64  `json:"epic,omitempty" jsonschema:"id of the epic to link the task to; 0 removes the link"`
 }
 
 type mergeInput struct {
@@ -70,12 +80,12 @@ func New(s *store.Store, version string) *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "task_add",
 		Description: "Add a task to the board of the repository at cwd. Record work you plan to do or discover. " +
-			"body: " + bodyGuide + ". " + statusGuide,
+			"body: " + bodyGuide + ". " + statusGuide + " " + epicGuide,
 	}, h.add)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "task_list",
 		Description: "List tasks on the board of the repository at cwd, ordered by status then id, one title line each. " +
-			"Check it before starting work; read a card's body with task_get. " + statusGuide,
+			"Check it before starting work; read a card's body with task_get. Pass epic to list the tasks of one epic. " + statusGuide,
 	}, h.list)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "task_get",
@@ -89,8 +99,9 @@ func New(s *store.Store, version string) *mcp.Server {
 	}, h.move)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "task_update",
-		Description: "Replace a task's body, for example to record findings, blockers or a narrowed scope. " +
-			"Read it with task_get first and send the whole new body. body: " + bodyGuide + ". Status changes use task_move.",
+		Description: "Change a task's body, priority or epic; set only the fields to change. The body is replaced as a whole, " +
+			"so read it with task_get first and send the whole new body. body: " + bodyGuide + ". " + epicGuide +
+			" Status changes use task_move.",
 	}, h.update)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "task_merge",
@@ -114,7 +125,11 @@ func (h handlers) add(ctx context.Context, _ *mcp.CallToolRequest, in addInput) 
 	if err != nil {
 		return nil, nil, err
 	}
-	tk, err := h.store.Add(ctx, repoKey, task.Draft{Body: in.Body, Status: task.Status(in.Status)})
+	d := task.Draft{Body: in.Body, Status: task.Status(in.Status), Kind: task.Kind(in.Kind), Priority: task.Priority(in.Priority)}
+	if in.Epic != 0 {
+		d.EpicID = &in.Epic
+	}
+	tk, err := h.store.Add(ctx, repoKey, d)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -134,7 +149,7 @@ func (h handlers) list(ctx context.Context, _ *mcp.CallToolRequest, in listInput
 		}
 		statuses = []task.Status{st}
 	}
-	tasks, err := h.store.List(ctx, repoKey, store.Filter{Statuses: statuses})
+	tasks, err := h.store.List(ctx, repoKey, store.Filter{Statuses: statuses, Epic: in.Epic})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -165,7 +180,12 @@ func (h handlers) move(ctx context.Context, _ *mcp.CallToolRequest, in moveInput
 }
 
 func (h handlers) update(ctx context.Context, _ *mcp.CallToolRequest, in updateInput) (*mcp.CallToolResult, any, error) {
-	return h.patch(ctx, in.Cwd, in.ID, task.Patch{Body: &in.Body})
+	p := task.Patch{Body: in.Body, Epic: in.Epic}
+	if in.Priority != nil {
+		pr := task.Priority(*in.Priority)
+		p.Priority = &pr
+	}
+	return h.patch(ctx, in.Cwd, in.ID, p)
 }
 
 func (h handlers) get(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, any, error) {
