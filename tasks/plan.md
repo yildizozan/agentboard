@@ -26,10 +26,14 @@ CREATE TABLE tasks (
   repo        TEXT    NOT NULL,
   body        TEXT    NOT NULL,
   status      TEXT    NOT NULL,
+  kind        TEXT    NOT NULL,   -- task | epic
+  priority    TEXT    NOT NULL,   -- low | normal | high
+  epic_id     INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
 CREATE INDEX idx_tasks_repo_status ON tasks(repo, status);
+CREATE INDEX idx_tasks_epic ON tasks(epic_id);
 ```
 
 - **`body`:** Kartın tek içeriği Markdown'dır. İlk satır `# <başlık>` olmak zorundadır; düz ilk satır başlığa çevrilir, `##` ile başlayan ya da boş başlık reddedilir (`task.ValidateBody`). Başlık ayrı saklanmaz, `task.TitleOf` ile body'den türetilir (DRY).
@@ -38,7 +42,8 @@ CREATE INDEX idx_tasks_repo_status ON tasks(repo, status);
 - **Zamanlar:** Unix saniye (`INTEGER`).
 - **ID global:** Repo başına numara tutulmaz (KISS). Ancak her sorgu `WHERE repo = ?` içerir; bir repodaki agent, global ID ile başka bir reponun görevine dokunamaz.
 - **Repo listesi:** Ayrı bir `repos` tablosu yok. Board'un seçicisi `SELECT repo, COUNT(*) FROM tasks GROUP BY repo` ile beslenir. Tüm görevleri silinen repo seçiciden kaybolur; bu kabul edilir.
-- **Bilerek dışarıda bırakılanlar (YAGNI):** priority, kart sıralaması, tag, alt görev, yorum, görev sahibi, WIP limiti, arşiv.
+- **Epic ve priority:** Epic de bir karttır (`kind = epic`), kolonlarda durur ve elle taşınır. Bir task en fazla bir epic'e bağlanır; epic başka bir epic'e bağlanamaz. Bağın aynı repoda bir epic'i göstermesi `store` içinde, yazmayla aynı transaction'da kontrol edilir. `foreign_keys` açık olduğu için epic silinince task'ların bağı `NULL` olur. Kolon içinde sıra priority'ye (`high` önce), sonra `id`'ye göredir. Tür yalnızca oluştururken seçilir.
+- **Bilerek dışarıda bırakılanlar (YAGNI):** elle kart sıralaması, tag, iç içe epic, epic ilerleme sayacı, yorum, görev sahibi, WIP limiti, arşiv.
 
 ### Repo kimliği
 
@@ -72,16 +77,16 @@ Her tool ayrıca zorunlu `cwd` parametresi alır (agent'ın çalışma dizininin
 
 | Tool | Parametreler | Davranış |
 |---|---|---|
-| `task_add` | `body` (zorunlu, Markdown), `status?` (varsayılan `backlog`) | Görev ekler, oluşan satırı döner |
-| `task_list` | `status?` | Verilmezse `done` hariç tüm görevler, her biri tek başlık satırı. Sıra: durum sırası, sonra `id` |
+| `task_add` | `body` (zorunlu, Markdown), `status?` (varsayılan `backlog`), `kind?` (`task`/`epic`), `priority?` (varsayılan `normal`), `epic?` | Görev ekler, oluşan satırı döner |
+| `task_list` | `status?`, `epic?` | Verilmezse `done` hariç tüm görevler, her biri tek başlık satırı. Sıra: durum, priority, `id` |
 | `task_get` | `id` | Durum satırı ve tam Markdown body |
 | `task_move` | `id`, `status`, `from?` | `from` verilirse compare-and-swap: görev şu an `from` durumunda değilse değişiklik yapılmaz ve mevcut durum hata mesajında döner |
-| `task_update` | `id`, `body` | Body'nin tamamını değiştirir |
+| `task_update` | `id`, `body?`, `priority?`, `epic?` | Verilen alanları değiştirir; `epic: 0` bağı kaldırır; en az bir alan zorunlu |
 | `task_merge` | `id`, `source` | `source` kartını `id` kartına katar ve siler; `source` `doing` ise çakışma hatası |
 | `task_delete` | `id` | Görevi kalıcı olarak siler |
 
 - **Merge tek store metodundan geçer.** `store.Merge(ctx, repo, target, source)` tek bir immediate transaction içinde iki kartı okur, `source` `doing` ise `ConflictError` döner, hedefin body'sini `task.MergeBody` ile yazar ve `source`'u siler. `MergeBody` kaynağı `## Merged from #<id>: <başlık>` bölümü olarak ekler; kaynağın başlıkları bir seviye içeri kayar, code block'lar değişmez. `task_merge`, CLI `merge`, HTTP `POST .../merge` ve board'daki kart-üstüne-bırakma bu metodu çağırır.
-- **Taşıma ve düzenleme tek store metodundan geçer.** `task.Patch` (`Body`, `Status`, `From`; hepsi opsiyonel) ve `store.Update(ctx, repo, id, patch)` tek bir immediate transaction içinde çalışır. `task_move`, `task_update`, CLI `mv`/`edit` ve HTTP `PATCH` bu metodu çağırır (DRY). MCP'de iki ayrı tool olmalarının nedeni agent için anlamın net kalmasıdır (ISP).
+- **Taşıma ve düzenleme tek store metodundan geçer.** `task.Patch` (`Body`, `Status`, `From`, `Priority`, `Epic`; hepsi opsiyonel) ve `store.Update(ctx, repo, id, patch)` tek bir immediate transaction içinde çalışır. `task_move`, `task_update`, CLI `mv`/`edit` ve HTTP `PATCH` bu metodu çağırır (DRY). MCP'de iki ayrı tool olmalarının nedeni agent için anlamın net kalmasıdır (ISP).
 
 - Çıktı kompakt metindir: `#12 [doing] Fix login bug`. Satır formatı `task.Task.String()` içinde tek yerde tanımlanır; CLI ve MCP aynısını kullanır (DRY).
 - Domain hataları (bulunamadı, durum çakışması, geçersiz durum) protokol hatası olarak değil, tool hatası (`IsError`) olarak döner; agent mesajı okuyup karar verebilir. SDK'nın handler hatasını nasıl eşlediği uygulama sırasında dokümantasyondan doğrulanacak.
@@ -90,11 +95,11 @@ Her tool ayrıca zorunlu `cwd` parametresi alır (agent'ın çalışma dizininin
 ### CLI arayüzü
 
 ```
-agentboard add <body|-> [-s status]
-agentboard ls [-s status]
+agentboard add <body|-> [-s status] [-k kind] [-p priority] [-e epic]
+agentboard ls [-s status] [-e epic]
 agentboard show <id>
 agentboard mv <id> <status> [--from status]
-agentboard edit <id> <body|->
+agentboard edit <id> [<body|->] [-p priority] [-e epic]
 agentboard merge <target> <source>
 agentboard rm <id>
 agentboard serve
@@ -114,14 +119,14 @@ Global flag: `--repo <dir>`. Env: `AGENTBOARD_HOME`.
 |---|---|---|
 | `GET /api/repos` | | `[{path, name, count}]`; `name` path'in son parçası |
 | `GET /api/tasks?repo=` | | `{statuses, tasks}`; tüm durumlar dahil |
-| `POST /api/tasks?repo=` | `{body, status?}` | `201` ve oluşan görev; yanıtta türetilmiş `title` da bulunur |
-| `PATCH /api/tasks/{id}?repo=` | `{status?, from?, body?}` (gövde doğrudan `task.Patch`'e eşlenir) | Güncel görev; `from` uyuşmazsa `409` ve `current` alanında mevcut durum |
+| `POST /api/tasks?repo=` | `{body, status?, kind?, priority?, epic?}` | `201` ve oluşan görev; yanıtta türetilmiş `title` da bulunur |
+| `PATCH /api/tasks/{id}?repo=` | `{status?, from?, body?, priority?, epic?}` (gövde doğrudan `task.Patch`'e eşlenir) | Güncel görev; `from` uyuşmazsa `409` ve `current` alanında mevcut durum |
 | `DELETE /api/tasks/{id}?repo=` | | `204` |
 | `POST /api/tasks/{id}/merge?repo=` | `{source}` | Güncel hedef; kendine merge veya eksik `source` `400`, kart yoksa `404`, `source` `doing` ise `409` ve `current` |
 
 - Repo tüm görev isteklerinde `?repo=` query parametresiyle verilir; gövdeler sadece görev alanlarını taşır ve bilinmeyen alanlar `400` döner.
 - Handler'lar CLI ve MCP ile aynı `store` metotlarını ve `task` kurallarını çağırır (DRY). Domain hataları HTTP koduna tek bir fonksiyonda eşlenir: bulunamadı `404`, çakışma `409`, doğrulama `400`. Doğrulama hataları `task.ErrInvalid` ile eşleşir (`errors.Is`); böylece tüm katmanlar aynı ayrımı yapar.
-- **Durum listesi tek kaynaktan gelir:** `GET /api/tasks` yanıtındaki `statuses` alanı sütunların sırasını ve adlarını belirler. Frontend durum listesini kendi içinde tekrar tanımlamaz.
+- **Durum ve priority listeleri tek kaynaktan gelir:** `GET /api/tasks` yanıtındaki `statuses` alanı sütunların sırasını ve adlarını, `priorities` alanı editördeki seçenekleri belirler. Frontend bu listeleri kendi içinde tekrar tanımlamaz.
 
 **Güvenlik.** Yerel HTTP server, tarayıcıda açık başka bir sitenin isteklerine açıktır. Önlemler:
 - Server sadece loopback adresine bind edilir.
