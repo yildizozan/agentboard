@@ -157,6 +157,36 @@ func TestPatchTask(t *testing.T) {
 	expectStatus(t, e.do(t, "PATCH", "/api/tasks/abc?repo=x", `{"status":"done"}`), 400)
 }
 
+func mergeURL(id int64, repo string) string {
+	return "/api/tasks/" + jsonNumber(id) + "/merge?repo=" + url.QueryEscape(repo)
+}
+
+func TestMergeTask(t *testing.T) {
+	e := newEnv(t, nil)
+	target := e.add(t, repoA, "# target", task.Todo)
+	source := e.add(t, repoA, "# source\n\nmore", task.Backlog)
+	doing := e.add(t, repoA, "# claimed", task.Doing)
+	other := e.add(t, repoB, "# other repo", task.Todo)
+
+	rec := e.do(t, "POST", mergeURL(target.ID, repoA), `{"source":`+jsonNumber(source.ID)+`}`)
+	expectStatus(t, rec, 200)
+	got := decode[map[string]any](t, rec)
+	wantBody := "# target\n\n## Merged from #" + jsonNumber(source.ID) + ": source\n\nmore"
+	if got["body"] != wantBody || got["title"] != "target" || got["status"] != "todo" {
+		t.Errorf("merged = %+v, want body %q", got, wantBody)
+	}
+
+	rec = e.do(t, "POST", mergeURL(target.ID, repoA), `{"source":`+jsonNumber(doing.ID)+`}`)
+	expectStatus(t, rec, 409)
+	if got := decode[errorJSON](t, rec); got.Current != task.Doing {
+		t.Errorf("conflict body = %+v, want current doing", got)
+	}
+	expectStatus(t, e.do(t, "POST", mergeURL(target.ID, repoA), `{"source":`+jsonNumber(other.ID)+`}`), 404)
+	expectStatus(t, e.do(t, "POST", mergeURL(target.ID, repoA), `{"source":`+jsonNumber(target.ID)+`}`), 400)
+	expectStatus(t, e.do(t, "POST", mergeURL(target.ID, repoA), `{}`), 400)
+	expectStatus(t, e.do(t, "POST", mergeURL(target.ID, repoA), `{"src":1}`), 400)
+}
+
 func TestDeleteTask(t *testing.T) {
 	e := newEnv(t, nil)
 	tk := e.add(t, repoA, "card", task.Todo)
@@ -193,6 +223,7 @@ func TestWritesRequireJSON(t *testing.T) {
 	for _, tc := range []struct{ method, target string }{
 		{"POST", tasksURL(repoA)},
 		{"PATCH", taskURL(tk.ID, repoA)},
+		{"POST", mergeURL(tk.ID, repoA)},
 	} {
 		req := httptest.NewRequest(tc.method, tc.target, strings.NewReader(`{"body":"x"}`))
 		req.Host = "127.0.0.1:7420"

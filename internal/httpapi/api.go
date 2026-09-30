@@ -44,6 +44,10 @@ type createJSON struct {
 	Status task.Status `json:"status"`
 }
 
+type mergeJSON struct {
+	Source int64 `json:"source"`
+}
+
 type errorJSON struct {
 	Error   string      `json:"error"`
 	Current task.Status `json:"current,omitempty"`
@@ -59,6 +63,7 @@ func New(s *store.Store, ui fs.FS) http.Handler {
 	mux.HandleFunc("POST /api/tasks", a.createTask)
 	mux.HandleFunc("PATCH /api/tasks/{id}", a.patchTask)
 	mux.HandleFunc("DELETE /api/tasks/{id}", a.deleteTask)
+	mux.HandleFunc("POST /api/tasks/{id}/merge", a.mergeTask)
 	mux.HandleFunc("GET /api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusNotFound, errorJSON{Error: "not found"})
 	})
@@ -194,6 +199,29 @@ func (a api) patchTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tk, err := a.store.Update(r.Context(), repo, id, p)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, tk)
+}
+
+func (a api) mergeTask(w http.ResponseWriter, r *http.Request) {
+	repo, id, err := repoAndID(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var in mergeJSON
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, err)
+		return
+	}
+	if in.Source <= 0 {
+		writeError(w, task.Invalidf("source must be a task id"))
+		return
+	}
+	tk, err := a.store.Merge(r.Context(), repo, id, in.Source)
 	if err != nil {
 		writeError(w, err)
 		return
