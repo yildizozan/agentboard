@@ -214,6 +214,41 @@ func TestRmAndBadIDs(t *testing.T) {
 	}
 }
 
+func TestMergeFoldsSourceIntoTarget(t *testing.T) {
+	dir := setup(t)
+	mustRun(t, "--repo", dir, "add", "# Fix login", "-s", "todo")
+	mustRun(t, "--repo", dir, "add", "# Login broken\n\nsame bug")
+	if out := mustRun(t, "--repo", dir, "merge", "1", "2"); out != "merged #2 into #1\n#1 [todo] Fix login\n" {
+		t.Errorf("merge output = %q", out)
+	}
+	if out := mustRun(t, "--repo", dir, "show", "1"); out != "#1 [todo] Fix login\n\n# Fix login\n\n## Merged from #2: Login broken\n\nsame bug\n" {
+		t.Errorf("show after merge = %q", out)
+	}
+	if out := mustRun(t, "--repo", dir, "ls"); out != "#1 [todo] Fix login\n" {
+		t.Errorf("ls after merge = %q", out)
+	}
+}
+
+func TestMergeReportsBadInput(t *testing.T) {
+	dir := setup(t)
+	mustRun(t, "--repo", dir, "add", "# target")
+	mustRun(t, "--repo", dir, "add", "# claimed", "-s", "doing")
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"merge", "1", "2"}, "#2 is in doing"},
+		{[]string{"merge", "1", "1"}, "into itself"},
+		{[]string{"merge", "1", "9"}, "not found"},
+		{[]string{"merge", "x", "2"}, "invalid task id"},
+		{[]string{"merge", "1"}, "accepts 2 arg"},
+	} {
+		if _, err := run(t, append([]string{"--repo", dir}, tc.args...)...); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%v error = %v, want %q", tc.args, err, tc.want)
+		}
+	}
+}
+
 func TestMvIsRepoScoped(t *testing.T) {
 	a := setup(t)
 	b := newDir(t)
