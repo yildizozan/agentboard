@@ -103,6 +103,7 @@ Claude Code.
 | `task_get`    | `cwd`, `id`                    | Show a task's status line and full Markdown body      |
 | `task_move`   | `cwd`, `id`, `status`, `from?` | Move a task; with `from` it fails if the task moved   |
 | `task_update` | `cwd`, `id`, `body`            | Replace a task's body                                 |
+| `task_merge`  | `cwd`, `id`, `source`          | Fold `source` into `id` and delete it (not if `doing`) |
 | `task_delete` | `cwd`, `id`                    | Delete a task permanently                             |
 
 ### Cards
@@ -142,6 +143,7 @@ directory as an absolute path in `cwd`.
   line is the `# <title>` heading.
 - Read a task with `task_get`; put findings or a narrowed scope into its body
   with `task_update`, which replaces the whole body.
+- Fold duplicate or closely related tasks into one with `task_merge`.
 - When a task is finished, move it to `done`.
 - Use this board for work that other agents or later sessions should see.
 ```
@@ -156,6 +158,7 @@ agentboard ls [-s status]
 agentboard show <id>
 agentboard mv <id> <status> [--from status]
 agentboard edit <id> <body|->
+agentboard merge <target> <source>
 agentboard rm <id>
 agentboard serve
 agentboard install [--scope user|project]
@@ -171,7 +174,8 @@ agentboard board
 
 It prints the board URL of the current repository: the repository path is the
 page path, such as `http://127.0.0.1:7420/Users/me/project`. Pick any board from the selector, drag cards between
-columns, and add or delete tasks. Click a card title to read its rendered
+columns, drop a card on another card to merge it into that card, and add or
+delete tasks. Click a card title to read its rendered
 Markdown body and edit it (Cmd/Ctrl+Enter saves, Esc leaves the editor). The page refreshes every two seconds,
 so work done by agents shows up by itself. If an agent moved a card after the
 page last refreshed, dropping that card is refused and the board reloads

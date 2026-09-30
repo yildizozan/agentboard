@@ -77,8 +77,10 @@ Her tool ayrıca zorunlu `cwd` parametresi alır (agent'ın çalışma dizininin
 | `task_get` | `id` | Durum satırı ve tam Markdown body |
 | `task_move` | `id`, `status`, `from?` | `from` verilirse compare-and-swap: görev şu an `from` durumunda değilse değişiklik yapılmaz ve mevcut durum hata mesajında döner |
 | `task_update` | `id`, `body` | Body'nin tamamını değiştirir |
+| `task_merge` | `id`, `source` | `source` kartını `id` kartına katar ve siler; `source` `doing` ise çakışma hatası |
 | `task_delete` | `id` | Görevi kalıcı olarak siler |
 
+- **Merge tek store metodundan geçer.** `store.Merge(ctx, repo, target, source)` tek bir immediate transaction içinde iki kartı okur, `source` `doing` ise `ConflictError` döner, hedefin body'sini `task.MergeBody` ile yazar ve `source`'u siler. `MergeBody` kaynağı `## Merged from #<id>: <başlık>` bölümü olarak ekler; kaynağın başlıkları bir seviye içeri kayar, code block'lar değişmez. `task_merge`, CLI `merge`, HTTP `POST .../merge` ve board'daki kart-üstüne-bırakma bu metodu çağırır.
 - **Taşıma ve düzenleme tek store metodundan geçer.** `task.Patch` (`Body`, `Status`, `From`; hepsi opsiyonel) ve `store.Update(ctx, repo, id, patch)` tek bir immediate transaction içinde çalışır. `task_move`, `task_update`, CLI `mv`/`edit` ve HTTP `PATCH` bu metodu çağırır (DRY). MCP'de iki ayrı tool olmalarının nedeni agent için anlamın net kalmasıdır (ISP).
 
 - Çıktı kompakt metindir: `#12 [doing] Fix login bug`. Satır formatı `task.Task.String()` içinde tek yerde tanımlanır; CLI ve MCP aynısını kullanır (DRY).
@@ -93,6 +95,7 @@ agentboard ls [-s status]
 agentboard show <id>
 agentboard mv <id> <status> [--from status]
 agentboard edit <id> <body|->
+agentboard merge <target> <source>
 agentboard rm <id>
 agentboard serve
 agentboard board [--addr 127.0.0.1:7420]
@@ -114,6 +117,7 @@ Global flag: `--repo <dir>`. Env: `AGENTBOARD_HOME`.
 | `POST /api/tasks?repo=` | `{body, status?}` | `201` ve oluşan görev; yanıtta türetilmiş `title` da bulunur |
 | `PATCH /api/tasks/{id}?repo=` | `{status?, from?, body?}` (gövde doğrudan `task.Patch`'e eşlenir) | Güncel görev; `from` uyuşmazsa `409` ve `current` alanında mevcut durum |
 | `DELETE /api/tasks/{id}?repo=` | | `204` |
+| `POST /api/tasks/{id}/merge?repo=` | `{source}` | Güncel hedef; kendine merge veya eksik `source` `400`, kart yoksa `404`, `source` `doing` ise `409` ve `current` |
 
 - Repo tüm görev isteklerinde `?repo=` query parametresiyle verilir; gövdeler sadece görev alanlarını taşır ve bilinmeyen alanlar `400` döner.
 - Handler'lar CLI ve MCP ile aynı `store` metotlarını ve `task` kurallarını çağırır (DRY). Domain hataları HTTP koduna tek bir fonksiyonda eşlenir: bulunamadı `404`, çakışma `409`, doğrulama `400`. Doğrulama hataları `task.ErrInvalid` ile eşleşir (`errors.Is`); böylece tüm katmanlar aynı ayrımı yapar.
