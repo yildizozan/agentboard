@@ -170,6 +170,46 @@ func (s *Store) Get(ctx context.Context, repo string, id int64) (task.Task, erro
 	return getTask(ctx, s.db, repo, id)
 }
 
+// Merge appends task sourceID to task targetID of repo (task.MergeBody) and deletes the
+// source, in one transaction. It returns task.ErrNotFound when either task is not in repo
+// and *task.ConflictError when the source is doing, since an agent may be working on it.
+func (s *Store) Merge(ctx context.Context, repo string, targetID, sourceID int64) (task.Task, error) {
+	if targetID == sourceID {
+		return task.Task{}, task.Invalidf("cannot merge task #%d into itself", targetID)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return task.Task{}, fmt.Errorf("begin merge: %w", err)
+	}
+	defer tx.Rollback()
+
+	target, err := getTask(ctx, tx, repo, targetID)
+	if err != nil {
+		return task.Task{}, err
+	}
+	source, err := getTask(ctx, tx, repo, sourceID)
+	if err != nil {
+		return task.Task{}, err
+	}
+	if source.Status == task.Doing {
+		return task.Task{}, &task.ConflictError{ID: sourceID, Current: source.Status}
+	}
+
+	target.Body = task.MergeBody(target, source)
+	now := time.Now().Unix()
+	target.UpdatedAt = time.Unix(now, 0)
+	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET body = ?, updated_at = ? WHERE id = ?`, target.Body, now, targetID); err != nil {
+		return task.Task{}, fmt.Errorf("update merge target: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, sourceID); err != nil {
+		return task.Task{}, fmt.Errorf("delete merge source: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return task.Task{}, fmt.Errorf("commit merge: %w", err)
+	}
+	return target, nil
+}
+
 // Delete removes task id from repo or returns task.ErrNotFound.
 func (s *Store) Delete(ctx context.Context, repo string, id int64) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ? AND repo = ?`, id, repo)

@@ -346,3 +346,86 @@ func TestUpdateBumpsUpdatedAt(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeAppendsSourceAndDeletesIt(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	target := mustAdd(t, s, "/r", "# Fix login\n\nA", task.Todo)
+	source := mustAdd(t, s, "/r", "# Login broken\n\n## Context\nB", task.Backlog)
+	if _, err := s.db.Exec(`UPDATE tasks SET updated_at = 1 WHERE id = ?`, target.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.Merge(ctx, "/r", target.ID, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("# Fix login\n\nA\n\n## Merged from #%d: Login broken\n\n### Context\nB", source.ID)
+	stored, err := s.Get(ctx, "/r", target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []task.Task{got, stored} {
+		if x.Body != want || x.Status != task.Todo || x.UpdatedAt.Unix() <= 1 {
+			t.Errorf("merged target = %+v, want body %q, status todo and a new updated_at", x, want)
+		}
+	}
+	if _, err := s.Get(ctx, "/r", source.ID); !errors.Is(err, task.ErrNotFound) {
+		t.Errorf("source after merge: %v, want ErrNotFound", err)
+	}
+}
+
+func TestMergeRefusesDoingSourceAndChangesNothing(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	target := mustAdd(t, s, "/r", "# target", task.Todo)
+	source := mustAdd(t, s, "/r", "# claimed by an agent", task.Doing)
+
+	_, err := s.Merge(ctx, "/r", target.ID, source.ID)
+	var conflict *task.ConflictError
+	if !errors.As(err, &conflict) || conflict.ID != source.ID || conflict.Current != task.Doing {
+		t.Fatalf("Merge error = %v, want a conflict naming the doing source", err)
+	}
+	if got, _ := s.Get(ctx, "/r", target.ID); got.Body != "# target" {
+		t.Errorf("target changed: %q", got.Body)
+	}
+	if _, err := s.Get(ctx, "/r", source.ID); err != nil {
+		t.Errorf("source removed: %v", err)
+	}
+}
+
+func TestMergeAllowsDoingTarget(t *testing.T) {
+	s, _ := openTemp(t)
+	target := mustAdd(t, s, "/r", "# in progress", task.Doing)
+	source := mustAdd(t, s, "/r", "# duplicate", task.Todo)
+	got, err := s.Merge(context.Background(), "/r", target.ID, source.ID)
+	if err != nil || got.Status != task.Doing {
+		t.Errorf("Merge into doing target = %+v, %v", got, err)
+	}
+}
+
+func TestMergeRejectsSelfMissingAndOtherRepo(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	a := mustAdd(t, s, "/a", "# in a", task.Todo)
+	b := mustAdd(t, s, "/b", "# in b", task.Todo)
+
+	if _, err := s.Merge(ctx, "/a", a.ID, a.ID); !errors.Is(err, task.ErrInvalid) {
+		t.Errorf("self merge error = %v, want ErrInvalid", err)
+	}
+	for name, ids := range map[string][2]int64{
+		"source in other repo": {a.ID, b.ID},
+		"target in other repo": {b.ID, a.ID},
+		"missing source":       {a.ID, 999},
+		"missing target":       {999, a.ID},
+	} {
+		if _, err := s.Merge(ctx, "/a", ids[0], ids[1]); !errors.Is(err, task.ErrNotFound) {
+			t.Errorf("%s: error = %v, want ErrNotFound", name, err)
+		}
+	}
+	for repo, tk := range map[string]task.Task{"/a": a, "/b": b} {
+		if got, err := s.Get(ctx, repo, tk.ID); err != nil || got.Body != tk.Body {
+			t.Errorf("%s changed after refused merges: %+v, %v", repo, got, err)
+		}
+	}
+}
