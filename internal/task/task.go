@@ -30,15 +30,52 @@ func Statuses() []Status { return slices.Clone(statuses) }
 func ActiveStatuses() []Status { return []Status{Backlog, Todo, Doing} }
 
 // ParseStatus converts s to a Status or reports the valid values.
-func ParseStatus(s string) (Status, error) {
-	if slices.Contains(statuses, Status(s)) {
-		return Status(s), nil
+func ParseStatus(s string) (Status, error) { return parseOneOf("status", s, statuses) }
+
+// Kind tells an ordinary task from an epic, which groups other tasks.
+type Kind string
+
+const (
+	TaskKind Kind = "task"
+	EpicKind Kind = "epic"
+)
+
+var kinds = []Kind{TaskKind, EpicKind}
+
+// ParseKind converts s to a Kind or reports the valid values.
+func ParseKind(s string) (Kind, error) { return parseOneOf("kind", s, kinds) }
+
+// Priority orders the tasks of a column: high first, low last.
+type Priority string
+
+const (
+	Low    Priority = "low"
+	Normal Priority = "normal"
+	High   Priority = "high"
+)
+
+// priorities is the single source of valid priorities, from lowest to highest.
+var priorities = []Priority{Low, Normal, High}
+
+// Priorities returns all priorities from lowest to highest.
+func Priorities() []Priority { return slices.Clone(priorities) }
+
+// ParsePriority converts s to a Priority or reports the valid values.
+func ParsePriority(s string) (Priority, error) { return parseOneOf("priority", s, priorities) }
+
+// Rank sorts priorities: 0 for high, larger for lower priorities.
+func (p Priority) Rank() int { return len(priorities) - 1 - slices.Index(priorities, p) }
+
+// parseOneOf returns s as a T when it is one of valid, or an error listing the valid values.
+func parseOneOf[T ~string](what, s string, valid []T) (T, error) {
+	if slices.Contains(valid, T(s)) {
+		return T(s), nil
 	}
-	names := make([]string, len(statuses))
-	for i, st := range statuses {
-		names[i] = string(st)
+	names := make([]string, len(valid))
+	for i, v := range valid {
+		names[i] = string(v)
 	}
-	return "", Invalidf("invalid status %q: must be one of %s", s, strings.Join(names, ", "))
+	return "", Invalidf("invalid %s %q: must be one of %s", what, s, strings.Join(names, ", "))
 }
 
 // Task is one card on a repo's board. Its content is a single Markdown body whose
@@ -48,6 +85,9 @@ type Task struct {
 	Repo      string    `json:"repo"`
 	Body      string    `json:"body"`
 	Status    Status    `json:"status"`
+	Kind      Kind      `json:"kind"`
+	Priority  Priority  `json:"priority"`
+	EpicID    *int64    `json:"epicId"` // the epic this task belongs to; nil for none
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -64,9 +104,21 @@ func (t Task) MarshalJSON() ([]byte, error) {
 	}{plain(t), t.Title()})
 }
 
-// String returns the compact line used by the CLI and MCP output.
+// String returns the compact line used by the CLI and MCP output, e.g.
+// "#12 [doing] [high] Fix login bug (epic #3)". Normal priority is not shown.
 func (t Task) String() string {
-	return fmt.Sprintf("#%d [%s] %s", t.ID, t.Status, t.Title())
+	line := fmt.Sprintf("#%d [%s]", t.ID, t.Status)
+	if t.Kind == EpicKind {
+		line += " [epic]"
+	}
+	if t.Priority != Normal && t.Priority != "" {
+		line += fmt.Sprintf(" [%s]", t.Priority)
+	}
+	line += " " + t.Title()
+	if t.EpicID != nil {
+		line += fmt.Sprintf(" (epic #%d)", *t.EpicID)
+	}
+	return line
 }
 
 // Detail returns the compact line followed by the full body, for reading one task.
@@ -115,18 +167,77 @@ func ValidateBody(body string) (string, error) {
 	return body, nil
 }
 
+// Draft is a task to be added. Empty Status, Kind and Priority take their defaults.
+type Draft struct {
+	Body     string
+	Status   Status
+	Kind     Kind
+	Priority Priority
+	EpicID   *int64
+}
+
+// Validate returns d with the body normalized and defaults filled in: backlog, task, normal.
+// Whether EpicID names an epic of the same board is checked by the store.
+func (d Draft) Validate() (Draft, error) {
+	body, err := ValidateBody(d.Body)
+	if err != nil {
+		return Draft{}, err
+	}
+	d.Body = body
+	if d.Status, err = parseOr(d.Status, Backlog, ParseStatus); err != nil {
+		return Draft{}, err
+	}
+	if d.Kind, err = parseOr(d.Kind, TaskKind, ParseKind); err != nil {
+		return Draft{}, err
+	}
+	if d.Priority, err = parseOr(d.Priority, Normal, ParsePriority); err != nil {
+		return Draft{}, err
+	}
+	if d.EpicID != nil {
+		if *d.EpicID <= 0 {
+			return Draft{}, Invalidf("invalid epic id %d", *d.EpicID)
+		}
+		if d.Kind == EpicKind {
+			return Draft{}, ErrNestedEpic
+		}
+	}
+	return d, nil
+}
+
+// ErrNestedEpic is returned when an epic would be put into another epic.
+var ErrNestedEpic error = invalidError{msg: "an epic cannot belong to another epic"}
+
+// parseOr returns def for an empty v, and otherwise v checked by parse.
+func parseOr[T ~string](v, def T, parse func(string) (T, error)) (T, error) {
+	if v == "" {
+		return def, nil
+	}
+	return parse(string(v))
+}
+
 // Patch describes a change to a task; nil fields stay unchanged.
 // When From is set the change applies only if the task is currently in From (compare-and-swap).
+// Epic links the task to that epic; 0 removes the link.
 type Patch struct {
-	Body   *string `json:"body,omitempty"`
-	Status *Status `json:"status,omitempty"`
-	From   *Status `json:"from,omitempty"`
+	Body     *string   `json:"body,omitempty"`
+	Status   *Status   `json:"status,omitempty"`
+	From     *Status   `json:"from,omitempty"`
+	Priority *Priority `json:"priority,omitempty"`
+	Epic     *int64    `json:"epic,omitempty"`
 }
 
 // Validate checks p and returns it with the body normalized.
 func (p Patch) Validate() (Patch, error) {
-	if p.Body == nil && p.Status == nil {
-		return Patch{}, Invalidf("nothing to change: set body or status")
+	if p.Body == nil && p.Status == nil && p.Priority == nil && p.Epic == nil {
+		return Patch{}, Invalidf("nothing to change: set body, status, priority or epic")
+	}
+	if p.Priority != nil {
+		if _, err := ParsePriority(string(*p.Priority)); err != nil {
+			return Patch{}, err
+		}
+	}
+	if p.Epic != nil && *p.Epic < 0 {
+		return Patch{}, Invalidf("invalid epic id %d", *p.Epic)
 	}
 	if p.From != nil && p.Status == nil {
 		return Patch{}, Invalidf("from requires status")
