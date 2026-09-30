@@ -38,19 +38,35 @@ func newMvCmd(opts *options) *cobra.Command {
 }
 
 func newEditCmd(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "edit <id> <body>",
-		Short: "Replace a task's body",
-		Long:  bodyHelp("Replace a task's body."),
-		Args:  cobra.ExactArgs(2),
+	var priority string
+	var epic int64
+	cmd := &cobra.Command{
+		Use:   "edit <id> [<body>]",
+		Short: "Change a task's body, priority or epic",
+		Long:  bodyHelp("Change a task's body, priority or epic; give only what changes. -e 0 removes the epic link."),
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			body, err := readBody(cmd, args[1])
-			if err != nil {
-				return err
+			var p task.Patch
+			if len(args) == 2 {
+				body, err := readBody(cmd, args[1])
+				if err != nil {
+					return err
+				}
+				p.Body = &body
 			}
-			return opts.updateTask(cmd, args[0], task.Patch{Body: &body})
+			if cmd.Flags().Changed("priority") {
+				pr := task.Priority(priority)
+				p.Priority = &pr
+			}
+			if cmd.Flags().Changed("epic") {
+				p.Epic = &epic
+			}
+			return opts.updateTask(cmd, args[0], p)
 		},
 	}
+	cmd.Flags().StringVarP(&priority, "priority", "p", "", "new priority: low, normal or high")
+	cmd.Flags().Int64VarP(&epic, "epic", "e", 0, "id of the epic to link the task to; 0 removes the link")
+	return cmd
 }
 
 func newShowCmd(opts *options) *cobra.Command {

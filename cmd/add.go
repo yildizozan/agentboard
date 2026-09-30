@@ -11,23 +11,24 @@ import (
 )
 
 func newAddCmd(opts *options) *cobra.Command {
-	var status string
+	var status, kind, priority string
+	var epic int64
 	cmd := &cobra.Command{
 		Use:   "add <body>",
 		Short: "Add a task to the repository's board",
 		Long:  bodyHelp("Add a task to the repository's board."),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			st, err := task.ParseStatus(status)
-			if err != nil {
-				return err
-			}
 			body, err := readBody(cmd, args[0])
 			if err != nil {
 				return err
 			}
+			d := task.Draft{Body: body, Status: task.Status(status), Kind: task.Kind(kind), Priority: task.Priority(priority)}
+			if epic != 0 {
+				d.EpicID = &epic
+			}
 			return opts.withBoard(func(s *store.Store, repoKey string) error {
-				tk, err := s.Add(cmd.Context(), repoKey, task.Draft{Body: body, Status: st})
+				tk, err := s.Add(cmd.Context(), repoKey, d)
 				if err != nil {
 					return err
 				}
@@ -37,6 +38,9 @@ func newAddCmd(opts *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&status, "status", "s", string(task.Backlog), "initial status: backlog, todo, doing or done")
+	cmd.Flags().StringVarP(&kind, "kind", "k", string(task.TaskKind), "task or epic")
+	cmd.Flags().StringVarP(&priority, "priority", "p", string(task.Normal), "low, normal or high")
+	cmd.Flags().Int64VarP(&epic, "epic", "e", 0, "id of the epic this task belongs to")
 	return cmd
 }
 

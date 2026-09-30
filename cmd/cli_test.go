@@ -182,7 +182,7 @@ func TestEditReplacesBody(t *testing.T) {
 		t.Errorf("edit output = %q", out)
 	}
 	if _, err := run(t, "--repo", dir, "edit", "1"); err == nil {
-		t.Error("edit without body accepted")
+		t.Error("edit without changes accepted")
 	}
 	if _, err := run(t, "--repo", dir, "edit", "1", " "); err == nil {
 		t.Error("edit with blank body accepted")
@@ -242,6 +242,46 @@ func TestMergeReportsBadInput(t *testing.T) {
 		{[]string{"merge", "1", "9"}, "not found"},
 		{[]string{"merge", "x", "2"}, "invalid task id"},
 		{[]string{"merge", "1"}, "accepts 2 arg"},
+	} {
+		if _, err := run(t, append([]string{"--repo", dir}, tc.args...)...); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%v error = %v, want %q", tc.args, err, tc.want)
+		}
+	}
+}
+
+func TestEpicsAndPrioritiesFromTheCLI(t *testing.T) {
+	dir := setup(t)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"add", "# Auth rewrite", "-k", "epic", "-p", "high"}, "#1 [backlog] [epic] [high] Auth rewrite\n"},
+		{[]string{"add", "# Login", "-e", "1", "-p", "low"}, "#2 [backlog] [low] Login (epic #1)\n"},
+		{[]string{"add", "# Unrelated", "-s", "todo"}, "#3 [todo] Unrelated\n"},
+		{[]string{"ls", "-e", "1"}, "#2 [backlog] [low] Login (epic #1)\n"},
+		{[]string{"edit", "2", "-p", "high"}, "#2 [backlog] [high] Login (epic #1)\n"},
+		{[]string{"edit", "2", "-e", "0"}, "#2 [backlog] [high] Login\n"},
+		{[]string{"edit", "2", "# Login page", "-e", "1"}, "#2 [backlog] [high] Login page (epic #1)\n"},
+	} {
+		if out := mustRun(t, append([]string{"--repo", dir}, tc.args...)...); out != tc.want {
+			t.Errorf("%v = %q, want %q", tc.args, out, tc.want)
+		}
+	}
+}
+
+func TestEpicAndPriorityErrorsFromTheCLI(t *testing.T) {
+	dir := setup(t)
+	mustRun(t, "--repo", dir, "add", "# plain")
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"add", "# x", "-k", "story"}, "invalid kind"},
+		{[]string{"add", "# x", "-p", "urgent"}, "invalid priority"},
+		{[]string{"add", "# x", "-e", "9"}, "not found"},
+		{[]string{"add", "# x", "-e", "1"}, "not an epic"},
+		{[]string{"edit", "1"}, "nothing to change"},
+		{[]string{"edit", "1", "-p", "urgent"}, "invalid priority"},
 	} {
 		if _, err := run(t, append([]string{"--repo", dir}, tc.args...)...); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%v error = %v, want %q", tc.args, err, tc.want)

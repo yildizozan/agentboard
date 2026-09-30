@@ -11,6 +11,7 @@ import (
 
 func newLsCmd(opts *options) *cobra.Command {
 	var status string
+	var epic int64
 	cmd := &cobra.Command{
 		Use:   "ls",
 		Short: "List the repository's tasks (done tasks only with -s done)",
@@ -25,7 +26,7 @@ func newLsCmd(opts *options) *cobra.Command {
 				statuses = []task.Status{st}
 			}
 			return opts.withBoard(func(s *store.Store, repoKey string) error {
-				tasks, err := s.List(cmd.Context(), repoKey, store.Filter{Statuses: statuses})
+				tasks, err := s.List(cmd.Context(), repoKey, store.Filter{Statuses: statuses, Epic: epic})
 				if err != nil {
 					return err
 				}
@@ -37,5 +38,6 @@ func newLsCmd(opts *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&status, "status", "s", "", "only show this status (default: all except done)")
+	cmd.Flags().Int64VarP(&epic, "epic", "e", 0, "only show the tasks of this epic")
 	return cmd
 }
