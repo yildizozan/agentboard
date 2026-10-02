@@ -12,6 +12,7 @@ import (
 
 func newMvCmd(opts *options) *cobra.Command {
 	var from string
+	var expectedRevision int64
 	cmd := &cobra.Command{
 		Use:   "mv <id> <status>",
 		Short: "Move a task to another status",
@@ -23,6 +24,9 @@ func newMvCmd(opts *options) *cobra.Command {
 				return err
 			}
 			p := task.Patch{Status: &st}
+			if cmd.Flags().Changed("expected-revision") {
+				p.ExpectedRevision = &expectedRevision
+			}
 			if from != "" {
 				f, err := task.ParseStatus(from)
 				if err != nil {
@@ -34,12 +38,14 @@ func newMvCmd(opts *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "only move if the task is currently in this status")
+	cmd.Flags().Int64Var(&expectedRevision, "expected-revision", 0, "only move if the revision from show still matches")
 	return cmd
 }
 
 func newEditCmd(opts *options) *cobra.Command {
 	var priority string
 	var epic int64
+	var expectedRevision int64
 	cmd := &cobra.Command{
 		Use:   "edit <id> [<body>]",
 		Short: "Change a task's body, priority or epic",
@@ -47,6 +53,9 @@ func newEditCmd(opts *options) *cobra.Command {
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var p task.Patch
+			if cmd.Flags().Changed("expected-revision") {
+				p.ExpectedRevision = &expectedRevision
+			}
 			if len(args) == 2 {
 				body, err := readBody(cmd, args[1])
 				if err != nil {
@@ -66,6 +75,7 @@ func newEditCmd(opts *options) *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&priority, "priority", "p", "", "new priority: low, normal or high")
 	cmd.Flags().Int64VarP(&epic, "epic", "e", 0, "positive id of the epic to move the task to")
+	cmd.Flags().Int64Var(&expectedRevision, "expected-revision", 0, "only edit if the revision from show still matches")
 	return cmd
 }
 

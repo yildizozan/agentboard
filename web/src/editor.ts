@@ -25,8 +25,8 @@ export interface EditorOptions {
   body: string
   submitLabel: string
   fields?: EditorFields
-  // save resolves true when the values were stored; on false the editor stays open with its text.
-  save: (values: EditorValues) => Promise<boolean>
+  // true closes the editor; false or an error message preserves the draft.
+  save: (values: EditorValues) => Promise<boolean | string>
   onClose: () => void
 }
 
@@ -113,18 +113,49 @@ export function openEditor(dialog: HTMLDialogElement, opts: EditorOptions) {
   hint.textContent = 'Markdown. The first line is the "# title". Cmd/Ctrl+Enter saves, Esc cancels.'
 
   const fields = opts.fields ? fieldsRow(opts.fields) : null
+  const error = document.createElement('p')
+  error.className = 'editor-error'
+  error.setAttribute('role', 'alert')
+  error.hidden = true
   const form = document.createElement('form')
   form.className = 'editor-form'
-  form.append(head, ...(fields ? [fields.row] : []), body, hint)
+  form.append(head, ...(fields ? [fields.row] : []), error, body, hint)
+  let saving = false
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
+    if (saving || signal.aborted) return
+    saving = true
+    error.hidden = true
+    const values = { body: body.value, ...fields?.values() }
+    const selects = [...form.querySelectorAll('select')].map((select) => ({ select, disabled: select.disabled }))
+    body.readOnly = true
+    selects.forEach(({ select }) => { select.disabled = true })
     save.disabled = true
-    const ok = await opts.save({ body: body.value, ...fields?.values() })
-    save.disabled = false
-    if (ok && !signal.aborted) dialog.close()
+    try {
+      const result = await opts.save(values)
+      if (signal.aborted) return
+      if (result === true) dialog.close()
+      else if (typeof result === 'string') {
+        error.textContent = result
+        error.hidden = false
+      }
+    } catch {
+      if (!signal.aborted) {
+        error.textContent = 'The task could not be saved. Your draft is still here; try again.'
+        error.hidden = false
+      }
+    } finally {
+      saving = false
+      save.disabled = false
+      body.readOnly = false
+      selects.forEach(({ select, disabled }) => { select.disabled = disabled })
+    }
   })
   body.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) form.requestSubmit()
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      if (!saving) form.requestSubmit()
+    }
   })
   dialog.addEventListener(
     'close',

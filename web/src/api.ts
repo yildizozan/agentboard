@@ -15,6 +15,7 @@ export interface Task {
   epicId: number | null
   createdAt: string
   updatedAt: string
+  revision: number
 }
 
 export interface Repo {
@@ -31,6 +32,7 @@ export interface Board {
 }
 
 export interface Patch {
+  expectedRevision?: number
   body?: string
   status?: Status
   from?: Status

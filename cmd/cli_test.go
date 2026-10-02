@@ -90,7 +90,7 @@ func TestAddMarkdownBodyAndShow(t *testing.T) {
 	if out != "#2 [todo] Write docs (epic #1)\n" {
 		t.Errorf("add output = %q", out)
 	}
-	if out := mustRun(t, "--repo", dir, "show", "2"); out != "#2 [todo] Write docs (epic #1)\n\n# Write docs\n\n## Steps\n- [ ] README\n" {
+	if out := mustRun(t, "--repo", dir, "show", "2"); out != "#2 [todo] Write docs (epic #1)\nRevision: 1\n\n# Write docs\n\n## Steps\n- [ ] README\n" {
 		t.Errorf("show output = %q", out)
 	}
 	if _, err := run(t, "--repo", dir, "show", "9"); err == nil {
@@ -109,7 +109,7 @@ func TestAddReadsBodyFromStdin(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if got := mustRun(t, "--repo", dir, "show", "2"); got != "#2 [backlog] From stdin (epic #1)\n\n# From stdin\n\nbody text\n" {
+	if got := mustRun(t, "--repo", dir, "show", "2"); got != "#2 [backlog] From stdin (epic #1)\nRevision: 1\n\n# From stdin\n\nbody text\n" {
 		t.Errorf("show output = %q", got)
 	}
 }
@@ -229,7 +229,7 @@ func TestMergeFoldsSourceIntoTarget(t *testing.T) {
 	if out := mustRun(t, "--repo", dir, "merge", "2", "3"); out != "merged #3 into #2\n#2 [todo] Fix login (epic #1)\n" {
 		t.Errorf("merge output = %q", out)
 	}
-	if out := mustRun(t, "--repo", dir, "show", "2"); out != "#2 [todo] Fix login (epic #1)\n\n# Fix login\n\n## Merged from #3: Login broken\n\nsame bug\n" {
+	if out := mustRun(t, "--repo", dir, "show", "2"); out != "#2 [todo] Fix login (epic #1)\nRevision: 2\n\n# Fix login\n\n## Merged from #3: Login broken\n\nsame bug\n" {
 		t.Errorf("show after merge = %q", out)
 	}
 	if out := mustRun(t, "--repo", dir, "ls"); out != "#2 [todo] Fix login (epic #1)\n" {
@@ -348,8 +348,12 @@ func TestBoardServesUntilCanceled(t *testing.T) {
 	}
 	boardURL := strings.TrimSpace(strings.TrimPrefix(line, "agentboard board:"))
 	u, err := url.Parse(boardURL)
-	if err != nil || boardURL != "http://"+u.Host+resolved {
-		t.Fatalf("printed URL %q, want http://<addr>%s", boardURL, resolved)
+	wantPath := resolved
+	if !strings.HasPrefix(wantPath, "/") {
+		wantPath = "/" + wantPath
+	}
+	if err != nil || u.Scheme != "http" || u.Host == "" || u.Path != wantPath {
+		t.Fatalf("printed URL %q, want http://<addr> with decoded path %q", boardURL, wantPath)
 	}
 
 	res, err := http.Get("http://" + u.Host + "/api/tasks?repo=" + url.QueryEscape(resolved))
@@ -425,4 +429,28 @@ func TestTaskRequiresEpicFromCLI(t *testing.T) {
 	}
 	mustRun(t, "--repo", dir, "rm", "2")
 	mustRun(t, "--repo", dir, "rm", "1")
+}
+
+func TestEditAndMoveCheckExpectedRevision(t *testing.T) {
+	dir := setupBoard(t)
+	mustRun(t, "--repo", dir, "add", "# Original", "-e", "1")
+	mustRun(t, "--repo", dir, "edit", "2", "# Agent update", "--expected-revision", "1")
+	for _, args := range [][]string{
+		{"edit", "2", "# Stale draft", "--expected-revision", "1"},
+		{"mv", "2", "doing", "--expected-revision", "1"},
+	} {
+		if _, err := run(t, append([]string{"--repo", dir}, args...)...); err == nil || !strings.Contains(err.Error(), "revision") {
+			t.Errorf("%v error = %v, want revision conflict", args, err)
+		}
+	}
+	if out := mustRun(t, "--repo", dir, "show", "2"); !strings.Contains(out, "Revision: 2") || !strings.Contains(out, "# Agent update") || !strings.Contains(out, "[backlog]") {
+		t.Fatalf("conflicting writes changed task: %q", out)
+	}
+	mustRun(t, "--repo", dir, "mv", "2", "doing", "--expected-revision", "2")
+	if out := mustRun(t, "--repo", dir, "show", "2"); !strings.Contains(out, "Revision: 3") || !strings.Contains(out, "[doing]") {
+		t.Fatalf("matching revision did not move task: %q", out)
+	}
+	if _, err := run(t, "--repo", dir, "edit", "2", "# Invalid", "--expected-revision", "0"); err == nil {
+		t.Fatal("zero expected revision accepted")
+	}
 }

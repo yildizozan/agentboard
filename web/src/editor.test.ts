@@ -73,6 +73,34 @@ describe('openEditor', () => {
     }
   })
 
+  it('submits only once when the keyboard shortcut repeats during a pending save', async () => {
+    let finish!: (ok: boolean) => void
+    const pending = new Promise<boolean>((resolve) => { finish = resolve })
+    const { save } = open(vi.fn(() => pending))
+    for (let i = 0; i < 2; i++) {
+      textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))
+    }
+    expect(save).toHaveBeenCalledOnce()
+    finish(true)
+    await flush()
+  })
+
+  it('locks editable fields until a pending save finishes and restores their state on failure', async () => {
+    let finish!: (ok: boolean) => void
+    open(vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve })), undefined,
+      { cardKind: 'epic', priority: 'normal', priorities: ['normal', 'high'], epic: null, epics: [] })
+    buttonNamed('Add').click()
+    expect(textarea().readOnly).toBe(true)
+    expect(select('Priority')!.disabled).toBe(true)
+    expect(select('Epic')!.disabled).toBe(true)
+    finish(false)
+    await flush()
+    expect(textarea().readOnly).toBe(false)
+    expect(select('Priority')!.disabled).toBe(false)
+    expect(select('Epic')!.disabled).toBe(true)
+    expect(dialog.open).toBe(true)
+  })
+
   it('closes without saving on Cancel', () => {
     const { save, onClose } = open()
     buttonNamed('Cancel').click()

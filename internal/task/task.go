@@ -88,6 +88,7 @@ type Task struct {
 	Kind      Kind      `json:"kind"`
 	Priority  Priority  `json:"priority"`
 	EpicID    *int64    `json:"epicId"` // the epic this task belongs to; nil for an epic
+	Revision  int64     `json:"revision"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -121,9 +122,9 @@ func (t Task) String() string {
 	return line
 }
 
-// Detail returns the compact line followed by the full body, for reading one task.
+// Detail returns the compact line, revision and full body, for reading one task.
 func (t Task) Detail() string {
-	return t.String() + "\n\n" + t.Body
+	return fmt.Sprintf("%s\nRevision: %d\n\n%s", t.String(), t.Revision, t.Body)
 }
 
 // ErrInvalid matches every input validation error (errors.Is), so callers can map them to one response.
@@ -236,18 +237,23 @@ func parseOr[T ~string](v, def T, parse func(string) (T, error)) (T, error) {
 // Patch describes a change to a task; nil fields stay unchanged.
 // When From is set the change applies only if the task is currently in From (compare-and-swap).
 // Epic moves the task to another epic; it must be a positive id.
+// ExpectedRevision rejects stale changes when set; nil keeps unconditional updates compatible.
 type Patch struct {
-	Body     *string   `json:"body,omitempty"`
-	Status   *Status   `json:"status,omitempty"`
-	From     *Status   `json:"from,omitempty"`
-	Priority *Priority `json:"priority,omitempty"`
-	Epic     *int64    `json:"epic,omitempty"`
+	Body             *string   `json:"body,omitempty"`
+	Status           *Status   `json:"status,omitempty"`
+	From             *Status   `json:"from,omitempty"`
+	Priority         *Priority `json:"priority,omitempty"`
+	Epic             *int64    `json:"epic,omitempty"`
+	ExpectedRevision *int64    `json:"expectedRevision,omitempty"`
 }
 
 // Validate checks p and returns it with the body normalized.
 func (p Patch) Validate() (Patch, error) {
 	if p.Body == nil && p.Status == nil && p.Priority == nil && p.Epic == nil {
 		return Patch{}, Invalidf("nothing to change: set body, status, priority or epic")
+	}
+	if p.ExpectedRevision != nil && *p.ExpectedRevision < 1 {
+		return Patch{}, Invalidf("expected revision must be positive")
 	}
 	if p.Priority != nil {
 		if _, err := ParsePriority(string(*p.Priority)); err != nil {
@@ -292,4 +298,15 @@ type ConflictError struct {
 
 func (e *ConflictError) Error() string {
 	return fmt.Sprintf("task #%d is in %s", e.ID, e.Current)
+}
+
+// RevisionConflictError means a task changed since the caller read it.
+type RevisionConflictError struct {
+	ID       int64
+	Expected int64
+	Current  int64
+}
+
+func (e *RevisionConflictError) Error() string {
+	return fmt.Sprintf("task #%d changed: expected revision %d, current revision %d; reload before saving", e.ID, e.Expected, e.Current)
 }

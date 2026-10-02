@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   priority    TEXT    NOT NULL,
   epic_id     INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
   created_at  INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL
+  updated_at  INTEGER NOT NULL,
+  revision    INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_repo_status ON tasks(repo, status);

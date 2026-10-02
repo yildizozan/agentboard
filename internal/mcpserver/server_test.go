@@ -128,7 +128,7 @@ func TestAddAndList(t *testing.T) {
 	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir, "status": "done"}); out != "#3 [done] Ship it (epic #1)\n#1 [done] [epic] [low] Test epic" {
 		t.Errorf("task_list done = %q", out)
 	}
-	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 4}); out != "#4 [doing] Now (epic #1)\n\n# Now\n\n## Context\ndetails" {
+	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 4}); out != "#4 [doing] Now (epic #1)\nRevision: 1\n\n# Now\n\n## Context\ndetails" {
 		t.Errorf("task_get = %q", out)
 	}
 }
@@ -233,7 +233,7 @@ func TestMergeFoldsSourceIntoTarget(t *testing.T) {
 	if out := mustCall(t, cs, "task_merge", map[string]any{"cwd": dir, "id": 2, "source": 3}); out != "merged #3 into #2\n#2 [todo] Fix login (epic #1)" {
 		t.Errorf("task_merge = %q", out)
 	}
-	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 2}); out != "#2 [todo] Fix login (epic #1)\n\n# Fix login\n\n## Merged from #3: Login broken\n\n### Context\nsame bug" {
+	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 2}); out != "#2 [todo] Fix login (epic #1)\nRevision: 2\n\n# Fix login\n\n## Merged from #3: Login broken\n\n### Context\nsame bug" {
 		t.Errorf("task_get after merge = %q", out)
 	}
 	if out := mustCall(t, cs, "task_list", map[string]any{"cwd": dir}); out != "#2 [todo] Fix login (epic #1)" {
@@ -330,4 +330,57 @@ func TestTaskRequiresEpicOverMCP(t *testing.T) {
 	}
 	mustCall(t, cs, "task_delete", map[string]any{"cwd": dir, "id": 2})
 	mustCall(t, cs, "task_delete", map[string]any{"cwd": dir, "id": 1})
+}
+
+func TestUpdateAndMoveRejectStaleRevisions(t *testing.T) {
+	cs := connect(t)
+	dir := workDir(t)
+	parentEpic(t, cs, dir)
+	mustCall(t, cs, "task_add", map[string]any{"cwd": dir, "body": "# Original", "epic": 1})
+	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 2}); !strings.Contains(out, "\nRevision: 1\n") {
+		t.Fatalf("initial revision missing: %q", out)
+	}
+	mustCall(t, cs, "task_update", map[string]any{"cwd": dir, "id": 2, "body": "# Newest", "expectedRevision": 1})
+	for name, args := range map[string]map[string]any{
+		"task_update": {"cwd": dir, "id": 2, "body": "# Stale", "expectedRevision": 1},
+		"task_move":   {"cwd": dir, "id": 2, "status": "doing", "expectedRevision": 1},
+	} {
+		if out, isErr := call(t, cs, name, args); !isErr || !strings.Contains(out, "revision") {
+			t.Errorf("%s accepted stale revision: %q, isError=%v", name, out, isErr)
+		}
+	}
+	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 2}); out != "#2 [backlog] Newest (epic #1)\nRevision: 2\n\n# Newest" {
+		t.Errorf("stale request changed card: %q", out)
+	}
+	mustCall(t, cs, "task_move", map[string]any{"cwd": dir, "id": 2, "status": "doing", "expectedRevision": 2})
+	if out := mustCall(t, cs, "task_get", map[string]any{"cwd": dir, "id": 2}); !strings.Contains(out, "\nRevision: 3\n") || !strings.Contains(out, "[doing]") {
+		t.Errorf("matching revision did not move card: %q", out)
+	}
+}
+
+func TestRevisionGuardIsOptionalInToolSchemas(t *testing.T) {
+	cs := connect(t)
+	res, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range res.Tools {
+		if tool.Name != "task_update" && tool.Name != "task_move" {
+			continue
+		}
+		raw, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var schema struct {
+			Properties map[string]any `json:"properties"`
+			Required   []string       `json:"required"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := schema.Properties["expectedRevision"]; !ok || slices.Contains(schema.Required, "expectedRevision") {
+			t.Errorf("%s must accept optional expectedRevision: %s", tool.Name, raw)
+		}
+	}
 }

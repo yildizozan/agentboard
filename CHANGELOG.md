@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Preserve existing tasks when upgrading from the original v0.1.0 database.
+- Keep editor drafts safe across slow saves, merges and repository switches;
+  ignore duplicate save shortcuts.
+- Reject stale edits through optional integer revisions in CLI, MCP and HTTP;
+  the web editor uses revision checks automatically.
+- Preserve Markdown code blocks during merges and handle special characters in
+  database paths correctly.
+- Resolve the requested repository independently of inherited Git directory settings.
+- Preserve project configuration when an inline TOML table cannot be extended.
+- Reject trailing or oversized JSON request data and disallow framing the board.
+
+### Added
+
+- Keyboard-accessible status and merge controls in card details.
+- A required test gate before releases, plus macOS and Windows runtime smoke tests.
+
 ## 0.2.0 — 2026-09-30
 
 ### Changed

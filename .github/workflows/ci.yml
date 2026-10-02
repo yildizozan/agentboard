@@ -1,6 +1,7 @@
 name: ci
 
 on:
+  workflow_call:
   push:
     branches: [main]
   pull_request:
@@ -35,3 +36,16 @@ jobs:
             GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go vet ./...
             GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null .
           done
+
+  runtime-smoke:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Exercise CLI, database path and loopback server
+        run: go test ./cmd -run '^(TestVersionFlag|TestBoardServesUntilCanceled|TestDataDirDefaultsToHome)$' -count=1

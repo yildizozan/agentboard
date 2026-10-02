@@ -47,17 +47,19 @@ type listInput struct {
 
 type moveInput struct {
 	cwdInput
-	ID     int64  `json:"id" jsonschema:"task id"`
-	Status string `json:"status" jsonschema:"target status: backlog, todo, doing or done"`
-	From   string `json:"from,omitempty" jsonschema:"status you expect the task to be in now; if it differs the move fails and reports the current status"`
+	ID               int64  `json:"id" jsonschema:"task id"`
+	Status           string `json:"status" jsonschema:"target status: backlog, todo, doing or done"`
+	From             string `json:"from,omitempty" jsonschema:"status you expect the task to be in now; if it differs the move fails and reports the current status"`
+	ExpectedRevision *int64 `json:"expectedRevision,omitempty" jsonschema:"revision from task_get; rejects the move if the card has changed"`
 }
 
 type updateInput struct {
 	cwdInput
-	ID       int64   `json:"id" jsonschema:"task id"`
-	Body     *string `json:"body,omitempty" jsonschema:"new card content; replaces the whole body"`
-	Priority *string `json:"priority,omitempty" jsonschema:"new priority: low, normal or high"`
-	Epic     *int64  `json:"epic,omitempty" jsonschema:"positive id of the epic to move the task to; the parent cannot be removed"`
+	ID               int64   `json:"id" jsonschema:"task id"`
+	Body             *string `json:"body,omitempty" jsonschema:"new card content; replaces the whole body"`
+	Priority         *string `json:"priority,omitempty" jsonschema:"new priority: low, normal or high"`
+	Epic             *int64  `json:"epic,omitempty" jsonschema:"positive id of the epic to move the task to; the parent cannot be removed"`
+	ExpectedRevision *int64  `json:"expectedRevision,omitempty" jsonschema:"revision from task_get; rejects the update if the card has changed"`
 }
 
 type mergeInput struct {
@@ -89,18 +91,19 @@ func New(s *store.Store, version string) *mcp.Server {
 	}, h.list)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "task_get",
-		Description: "Show one task of the board at cwd: its status line followed by its full Markdown body.",
+		Description: "Show one task of the board at cwd: its status, revision and full Markdown body.",
 	}, h.get)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "task_move",
 		Description: "Move a task to another status. When claiming a task pass from with the status you expect " +
 			"(e.g. status=doing, from=todo): if another agent moved it first the call fails and reports the current status. " +
+			"Pass expectedRevision from task_get to also detect intervening edits. " +
 			"Move tasks to done when finished. " + statusGuide,
 	}, h.move)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "task_update",
 		Description: "Change a task's body, priority or epic; set only the fields to change. The body is replaced as a whole, " +
-			"so read it with task_get first and send the whole new body. body: " + bodyGuide + ". " + epicGuide +
+			"so read it with task_get first and send the whole new body with its expectedRevision to avoid overwriting another edit. body: " + bodyGuide + ". " + epicGuide +
 			" Status changes use task_move.",
 	}, h.update)
 	mcp.AddTool(server, &mcp.Tool{
@@ -168,7 +171,7 @@ func (h handlers) move(ctx context.Context, _ *mcp.CallToolRequest, in moveInput
 	if err != nil {
 		return nil, nil, err
 	}
-	p := task.Patch{Status: &st}
+	p := task.Patch{Status: &st, ExpectedRevision: in.ExpectedRevision}
 	if in.From != "" {
 		from, err := task.ParseStatus(in.From)
 		if err != nil {
@@ -180,7 +183,7 @@ func (h handlers) move(ctx context.Context, _ *mcp.CallToolRequest, in moveInput
 }
 
 func (h handlers) update(ctx context.Context, _ *mcp.CallToolRequest, in updateInput) (*mcp.CallToolResult, any, error) {
-	p := task.Patch{Body: in.Body, Epic: in.Epic}
+	p := task.Patch{Body: in.Body, Epic: in.Epic, ExpectedRevision: in.ExpectedRevision}
 	if in.Priority != nil {
 		pr := task.Priority(*in.Priority)
 		p.Priority = &pr

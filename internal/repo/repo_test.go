@@ -130,3 +130,35 @@ func TestResolveRejectsBadInput(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveIgnoresInheritedRepositoryEnvironment(t *testing.T) {
+	isolateGit(t)
+	base := t.TempDir()
+	wanted := newRepo(t, base, "wanted")
+	other := newRepo(t, base, "other")
+	sub := filepath.Join(wanted, "sub")
+	plain := filepath.Join(base, "plain")
+	for _, dir := range []string{sub, plain} {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plain, _ = filepath.EvalSymlinks(plain)
+	for name, vars := range map[string]map[string]string{
+		"git dir":           {"GIT_DIR": filepath.Join(other, ".git")},
+		"work tree":         {"GIT_DIR": filepath.Join(other, ".git"), "GIT_WORK_TREE": other},
+		"common dir":        {"GIT_COMMON_DIR": filepath.Join(other, ".git")},
+		"discovery ceiling": {"GIT_CEILING_DIRECTORIES": wanted},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for key, value := range vars {
+				t.Setenv(key, value)
+			}
+			for dir, want := range map[string]string{sub: wanted, plain: plain} {
+				if got := mustResolve(t, dir); got != want {
+					t.Errorf("Resolve(%q) = %q, want %q", dir, got, want)
+				}
+			}
+		})
+	}
+}

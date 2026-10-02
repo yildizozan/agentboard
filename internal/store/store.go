@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -38,12 +39,23 @@ type Store struct {
 	db *sql.DB
 }
 
-// Open creates the parent directory if needed, opens the database and creates the schema.
+// Open creates the parent directory if needed, opens the database and upgrades the schema.
 func Open(path string) (*Store, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve db path: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", "file:"+path+dsnParams)
+	// SQLite uses a URI, so literal ?, # and % in filenames must be escaped.
+	// The leading slash also keeps Windows drive letters in the URI path.
+	uriPath := filepath.ToSlash(path)
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	uri := url.URL{Scheme: "file", Path: uriPath}
+	db, err := sql.Open("sqlite", uri.String()+dsnParams)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
@@ -56,9 +68,9 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.ExecContext(ctx, schema); err != nil {
+	if err := s.migrate(ctx); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("create schema: %w", err)
+		return nil, err
 	}
 	return s, nil
 }
@@ -133,6 +145,7 @@ func (s *Store) Add(ctx context.Context, repo string, d task.Draft) (task.Task, 
 		Kind:      d.Kind,
 		Priority:  d.Priority,
 		EpicID:    d.EpicID,
+		Revision:  1,
 		CreatedAt: time.Unix(now, 0),
 		UpdatedAt: time.Unix(now, 0),
 	}, nil
@@ -169,6 +182,9 @@ func (s *Store) Update(ctx context.Context, repo string, id int64, p task.Patch)
 	if err != nil {
 		return task.Task{}, err
 	}
+	if p.ExpectedRevision != nil && tk.Revision != *p.ExpectedRevision {
+		return task.Task{}, &task.RevisionConflictError{ID: id, Expected: *p.ExpectedRevision, Current: tk.Revision}
+	}
 	if p.From != nil && tk.Status != *p.From {
 		return task.Task{}, &task.ConflictError{ID: id, Current: tk.Status}
 	}
@@ -187,9 +203,10 @@ func (s *Store) Update(ctx context.Context, repo string, id int64, p task.Patch)
 	}
 	now := time.Now().Unix()
 	tk.UpdatedAt = time.Unix(now, 0)
+	tk.Revision++
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE tasks SET body = ?, status = ?, priority = ?, epic_id = ?, updated_at = ? WHERE id = ?`,
-		tk.Body, string(tk.Status), string(tk.Priority), tk.EpicID, now, id); err != nil {
+		`UPDATE tasks SET body = ?, status = ?, priority = ?, epic_id = ?, updated_at = ?, revision = ? WHERE id = ?`,
+		tk.Body, string(tk.Status), string(tk.Priority), tk.EpicID, now, tk.Revision, id); err != nil {
 		return task.Task{}, fmt.Errorf("update task: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -252,11 +269,12 @@ func (s *Store) Merge(ctx context.Context, repo string, targetID, sourceID int64
 	target.Body = task.MergeBody(target, source)
 	now := time.Now().Unix()
 	target.UpdatedAt = time.Unix(now, 0)
-	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET body = ?, updated_at = ? WHERE id = ?`, target.Body, now, targetID); err != nil {
+	target.Revision++
+	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET body = ?, updated_at = ?, revision = ? WHERE id = ?`, target.Body, now, target.Revision, targetID); err != nil {
 		return task.Task{}, fmt.Errorf("update merge target: %w", err)
 	}
 	// Move the source epic's tasks before deleting it, so every task keeps a parent.
-	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET epic_id = ? WHERE epic_id = ?`, targetID, sourceID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET epic_id = ?, updated_at = ?, revision = revision + 1 WHERE epic_id = ?`, targetID, now, sourceID); err != nil {
 		return task.Task{}, fmt.Errorf("move merged epic's tasks: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, sourceID); err != nil {
@@ -376,7 +394,7 @@ func (s *Store) Repos(ctx context.Context) ([]RepoSummary, error) {
 }
 
 // taskColumns is the column list scanTask expects.
-const taskColumns = `id, repo, body, status, kind, priority, epic_id, created_at, updated_at`
+const taskColumns = `id, repo, body, status, kind, priority, epic_id, created_at, updated_at, revision`
 
 // scanner is satisfied by *sql.Row and *sql.Rows.
 type scanner interface {
@@ -403,7 +421,7 @@ func scanTask(row scanner) (task.Task, error) {
 		epic                   sql.NullInt64
 		created, updated       int64
 	)
-	if err := row.Scan(&tk.ID, &tk.Repo, &tk.Body, &status, &kind, &priority, &epic, &created, &updated); err != nil {
+	if err := row.Scan(&tk.ID, &tk.Repo, &tk.Body, &status, &kind, &priority, &epic, &created, &updated, &tk.Revision); err != nil {
 		return task.Task{}, fmt.Errorf("scan task: %w", err)
 	}
 	tk.Status = task.Status(status)

@@ -46,7 +46,19 @@ func Resolve(dir string) (string, error) {
 
 // gitCommonDir returns the absolute common git dir for dir, or "" when dir is not in a repository.
 func gitCommonDir(dir string) (string, error) {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	// Hooks and agents may inherit another repository's Git environment. Select
+	// the board from dir while preserving unrelated configuration and process env.
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		switch strings.ToUpper(key) {
+		case "GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE",
+			"GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM":
+			continue
+		}
+		cmd.Env = append(cmd.Env, entry)
+	}
+	out, err := cmd.Output()
 	var exitErr *exec.ExitError
 	switch {
 	case err == nil:

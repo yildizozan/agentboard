@@ -1,5 +1,7 @@
 # Uygulama Planı: agentboard
 
+> **Tarihsel belge:** Bu dosya ilk uygulamanın tasarım kararlarını kaydeder; güncel ürün sözleşmesi değildir. Güncel davranış için `README.md` ve değişiklikler için `CHANGELOG.md` kullanılmalıdır. Aşağıdaki isteğe bağlı epic, migration olmaması, frontend testi olmaması ve eski paket yolları güncel kodu yansıtmaz. Atıf yapılan eski `tasks/todo.md` kontrol listesi kaldırılmıştır.
+
 ## Genel bakış
 
 `agentboard`, kodlama agent'larının çalışırken repo bazlı iş listesi tutmasını sağlayan bir MCP sunucusu, CLI ve web board'dur. Görevler dört durumdan geçer: `backlog`, `todo`, `doing`, `done`. Agent'lar MCP tool'ları ile görev ekler, listeler, taşır, düzenler ve siler. İnsan aynı veriyi CLI ile veya tarayıcıdaki kanban board ile görür ve yönetir; board tüm repolar arasında seçici sunar. Veri tek bir SQLite dosyasında (`~/.agentboard/agentboard.db`) tutulur ve oturumlar arasında kalıcıdır.

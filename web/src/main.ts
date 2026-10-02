@@ -1,5 +1,5 @@
 import './style.css'
-import { api, ApiError, type Board, type Repo, type Status, type Task } from './api'
+import { api, ApiError, type Board, type Patch, type Repo, type Status, type Task } from './api'
 import { dropAction } from './drop'
 import { openEditor, type EditorFields, type EditorValues } from './editor'
 import { cardHue } from './epic'
@@ -16,6 +16,8 @@ const state = {
   dragging: null as { id: number; from: Status } | null,
   openId: null as number | null, // task shown in the detail dialog
   editing: false, // the editor dialog is open; polling pauses so it is not disturbed
+  editorSession: 0,
+  tasksById: new Map<number, Task>(),
 }
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -74,38 +76,58 @@ function markdown(body: string): HTMLElement {
 }
 
 let boardKey = ''
-async function refresh() {
+let refreshSequence = 0
+let refreshPending = false
+async function refresh(background = false): Promise<boolean> {
+  if (background && refreshPending) return false
+  refreshPending = true
+  const request = ++refreshSequence
+  const selectedRepo = state.repo
   try {
-    state.repos = await api.repos()
-    if (!state.repo && state.repos.length > 0) setRepo(state.repos[0].path)
-    state.board = state.repo ? await api.board(state.repo) : null
-    const key = JSON.stringify([state.repo, state.repos, state.board])
-    if (key === boardKey) return // unchanged poll: keep the DOM, so selections and scroll survive
+    const repos = await api.repos()
+    if (request !== refreshSequence || selectedRepo !== state.repo) return false
+    if (!state.repo && repos.length > 0) setRepo(repos[0].path)
+    const repo = state.repo
+    const board = repo ? await api.board(repo) : null
+    if (request !== refreshSequence || repo !== state.repo) return false
+    state.repos = repos
+    state.board = board
+    const key = JSON.stringify([repo, repos, board])
+    if (key === boardKey) return true // unchanged poll: keep the DOM, so selections and scroll survive
     boardKey = key
     render()
+    return true
   } catch (err) {
-    toast(errorMessage(err))
+    if (request === refreshSequence) toast(errorMessage(err))
+    return false
+  } finally {
+    if (request === refreshSequence) refreshPending = false
   }
 }
 
 function setRepo(path: string) {
   state.repo = path
+  state.board = null
+  state.tasksById.clear()
+  boardKey = ''
   closeDetail()
   history.replaceState(null, '', boardPath(path))
+  render()
 }
 
 function render() {
   renderSelect()
-  ui.addButton.disabled = !state.repo
+  ui.addButton.disabled = !state.repo || !state.board
   if (!state.board) {
     ui.columns.replaceChildren()
     ui.empty.hidden = false
-    ui.empty.textContent = 'No boards yet. A board appears when an agent or the CLI adds its first task.'
+    ui.empty.textContent = state.repo ? 'Loading board…' : 'No boards yet. A board appears when an agent or the CLI adds its first task.'
     renderDetail()
     return
   }
   ui.empty.hidden = true
   const { statuses, tasks } = state.board
+  state.tasksById = new Map(tasks.map((t) => [t.id, t]))
   ui.columns.replaceChildren(...statuses.map((s) => column(s, tasks.filter((t) => t.status === s))))
   renderDetail()
 }
@@ -219,7 +241,7 @@ function badges(t: Task): HTMLElement[] {
 }
 
 function epicOf(t: Task): Task | undefined {
-  return t.epicId === null ? undefined : state.board?.tasks.find((x) => x.id === t.epicId)
+  return t.epicId === null ? undefined : state.tasksById.get(t.epicId)
 }
 
 function epics(): { id: number; title: string }[] {
@@ -228,7 +250,7 @@ function epics(): { id: number; title: string }[] {
 
 function renderDetail() {
   if (state.openId === null) return
-  const t = state.board?.tasks.find((x) => x.id === state.openId)
+  const t = state.tasksById.get(state.openId)
   if (!t) {
     closeDetail()
     toast('The task was deleted.')
@@ -240,13 +262,50 @@ function renderDetail() {
   if (epic) meta.append(button(`#${epic.id} ${epic.title}`, 'detail-epic', () => openDetail(epic.id)))
   const head = el('div', 'detail-head', meta,
     el('div', 'edit-actions', button('Edit', '', () => editTask(t)), button('Close', '', closeDetail)))
-  ui.detail.replaceChildren(head, markdown(t.body), ...epicTasks(t))
+  ui.detail.replaceChildren(head, taskActions(t), markdown(t.body), ...epicTasks(t))
   const hue = cardHue(t)
   if (hue) ui.detail.dataset.hue = hue
   else delete ui.detail.dataset.hue
   if (t.kind === 'epic') ui.detail.classList.add('epic')
   else ui.detail.classList.remove('epic')
   if (!ui.detail.open) ui.detail.showModal()
+}
+
+function taskActions(t: Task): HTMLElement {
+  const status = el('select')
+  status.setAttribute('aria-label', 'Status')
+  for (const value of state.board?.statuses ?? []) {
+    const option = el('option', '', value)
+    option.value = value
+    status.append(option)
+  }
+  status.value = t.status
+  status.addEventListener('change', async () => {
+    status.disabled = true
+    await moveTask(t.id, t.status, status.value)
+    status.disabled = false
+  })
+  const target = el('select')
+  target.setAttribute('aria-label', 'Merge into')
+  const placeholder = el('option', '', 'Select a task')
+  placeholder.value = ''
+  target.append(placeholder)
+  for (const candidate of state.board?.tasks ?? []) {
+    if (candidate.id === t.id) continue
+    const option = el('option', '', `#${candidate.id} ${candidate.title}`)
+    option.value = String(candidate.id)
+    target.append(option)
+  }
+  const merge = button('Merge', '', async () => {
+    const selected = state.tasksById.get(Number(target.value))
+    if (!selected) return
+    merge.disabled = true
+    await mergeTask(t.id, selected)
+    merge.disabled = !target.value
+  })
+  merge.disabled = true
+  target.addEventListener('change', () => { merge.disabled = !target.value })
+  return el('div', 'task-actions', el('label', '', 'Status ', status), el('label', '', 'Merge into ', target), merge)
 }
 
 // epicTasks lists the tasks of an epic in its detail dialog.
@@ -263,6 +322,7 @@ function epicTasks(t: Task): HTMLElement[] {
 function edit(heading: string, body: string, submitLabel: string, fields: EditorFields,
   write: (values: EditorValues) => Promise<unknown>) {
   state.editing = true
+  state.editorSession++
   openEditor(ui.editor, {
     heading,
     body,
@@ -272,8 +332,10 @@ function edit(heading: string, body: string, submitLabel: string, fields: Editor
       try {
         await write(values)
       } catch (err) {
-        toast(errorMessage(err)) // the editor stays open, so the text is not lost
-        return false
+        if (err instanceof ApiError && err.status === 409) {
+          return `${err.message} Your draft is preserved. Copy it before closing, then reopen the latest task to reconcile changes.`
+        }
+        return errorMessage(err)
       }
       boardKey = '' // re-render the detail dialog even if the saved body matches the last poll
       await refresh()
@@ -286,17 +348,23 @@ function edit(heading: string, body: string, submitLabel: string, fields: Editor
 }
 
 function addTask() {
+  const repo = state.repo
   const fields = { kind: epics().length ? 'task' as const : 'epic' as const, priority: 'normal', priorities: state.board?.priorities ?? [], epic: null, epics: epics() }
   edit('New task', '', 'Add to backlog', fields, (v) =>
-    api.create(state.repo, { body: v.body, kind: v.kind, priority: v.priority, ...(v.kind === 'epic' ? {} : { epic: v.epic! }) }))
+    api.create(repo, { body: v.body, kind: v.kind, priority: v.priority, ...(v.kind === 'epic' ? {} : { epic: v.epic! }) }))
 }
 
 function editTask(t: Task) {
   // An epic cannot belong to an epic, so its epic select stays empty.
   const fields = { cardKind: t.kind, priority: t.priority, priorities: state.board?.priorities ?? [], epic: t.epicId,
     epics: t.kind === 'epic' ? [] : epics().filter((e) => e.id !== t.id) }
-  edit(`Edit #${t.id}`, t.body, 'Save', fields, (v) =>
-    api.patch(state.repo, t.id, { body: v.body, priority: v.priority, ...(t.kind === 'epic' ? {} : { epic: v.epic! }) }))
+  edit(`Edit #${t.id}`, t.body, 'Save', fields, (v) => {
+    const patch: Patch = { expectedRevision: t.revision }
+    if (v.body !== t.body) patch.body = v.body
+    if (v.priority !== t.priority) patch.priority = v.priority
+    if (t.kind !== 'epic' && v.epic !== t.epicId) patch.epic = v.epic!
+    return Object.keys(patch).length === 1 ? Promise.resolve() : api.patch(t.repo, t.id, patch)
+  })
 }
 
 function openDetail(id: number) {
@@ -322,14 +390,23 @@ async function moveTask(id: number, from: Status, to: Status) {
   await refresh()
 }
 
+const pendingMerges = new Set<number>()
 async function mergeTask(sourceId: number, target: Task) {
-  const source = state.board?.tasks.find((x) => x.id === sourceId)
+  if (pendingMerges.has(sourceId)) return
+  const repo = state.repo
+  const editorSession = state.editorSession
+  const source = state.tasksById.get(sourceId)
   const question = `Merge #${sourceId} "${source?.title ?? ''}" into #${target.id} "${target.title}"? ` +
     `#${sourceId} will be deleted and its content added to #${target.id}.`
   if (!confirm(question)) return
-  let merged: Task
+  pendingMerges.add(sourceId)
   try {
-    merged = await api.merge(state.repo, target.id, sourceId)
+    const merged = await api.merge(repo, target.id, sourceId)
+    const refreshed = await refresh()
+    const current = state.tasksById.get(merged.id)
+    if (refreshed && current && state.repo === repo && state.editorSession === editorSession && !state.editing) {
+      editTask(current) // tidy the combined body without replacing another draft
+    }
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
       toast(`#${sourceId} is in ${err.current}; move it out of ${err.current} before merging.`)
@@ -337,10 +414,9 @@ async function mergeTask(sourceId: number, target: Task) {
       toast(errorMessage(err))
     }
     await refresh()
-    return
+  } finally {
+    pendingMerges.delete(sourceId)
   }
-  await refresh()
-  editTask(merged) // tidy the combined body
 }
 
 async function removeTask(t: Task) {
@@ -369,10 +445,10 @@ ui.detail.addEventListener('click', (e) => {
 
 // Poll so tasks written by agents appear; pause while dragging, editing or hidden.
 setInterval(() => {
-  if (!document.hidden && !state.dragging && !state.editing) void refresh()
+  if (!document.hidden && !state.dragging && !state.editing) void refresh(true)
 }, POLL_MS)
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) void refresh()
+  if (!document.hidden && !state.dragging && !state.editing) void refresh(true)
 })
 
 void refresh()

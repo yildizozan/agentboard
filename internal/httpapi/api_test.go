@@ -388,3 +388,77 @@ func TestTaskRequiresEpicOverHTTP(t *testing.T) {
 	expectStatus(t, e.do(t, "DELETE", taskURL(child.ID, repoA), ""), 204)
 	expectStatus(t, e.do(t, "DELETE", taskURL(epicID, repoA), ""), 204)
 }
+
+func TestRejectsJSONTrailingDataWithoutWrites(t *testing.T) {
+	for _, suffix := range []string{"garbage", `{}`, strings.Repeat(" ", maxBody)} {
+		t.Run(suffix[:min(len(suffix), 12)], func(t *testing.T) {
+			e := newEnv(t, nil)
+			target := e.add(t, repoA, "# Target", task.Todo)
+			source := e.add(t, repoA, "# Source", task.Todo)
+			for _, tc := range []struct{ method, url, body string }{
+				{"POST", tasksURL(repoA), `{"body":"# New","kind":"epic"}`},
+				{"PATCH", taskURL(target.ID, repoA), `{"body":"# Replaced"}`},
+				{"POST", mergeURL(target.ID, repoA), `{"source":` + jsonNumber(source.ID) + `}`},
+			} {
+				rec := e.do(t, tc.method, tc.url, tc.body+suffix)
+				if rec.Code != 400 {
+					t.Errorf("%s %s status = %d, want 400", tc.method, tc.url, rec.Code)
+				}
+			}
+			cards, err := e.store.List(context.Background(), repoA, store.Filter{})
+			if err != nil || len(cards) != 3 {
+				t.Fatalf("invalid JSON changed cards: %+v, err=%v", cards, err)
+			}
+			got, err := e.store.Get(context.Background(), repoA, target.ID)
+			if err != nil || got.Body != target.Body {
+				t.Errorf("invalid JSON changed target: %+v, err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestAllowsJSONTrailingWhitespace(t *testing.T) {
+	e := newEnv(t, nil)
+	expectStatus(t, e.do(t, "POST", tasksURL(repoA), "{\"body\":\"# Epic\",\"kind\":\"epic\"} \n\t"), 201)
+}
+
+func TestBoardCannotBeFramed(t *testing.T) {
+	for _, ui := range []fstest.MapFS{nil, {"index.html": {Data: []byte("<h1>board</h1>")}}} {
+		e := newEnv(t, ui)
+		rec := e.do(t, "GET", "/", "")
+		if rec.Header().Get("Content-Security-Policy") != "frame-ancestors 'none'" || rec.Header().Get("X-Frame-Options") != "DENY" {
+			t.Errorf("board allows framing: headers = %v", rec.Header())
+		}
+	}
+}
+
+func TestPatchRevisionConflictPreservesNewestCard(t *testing.T) {
+	e := newEnv(t, nil)
+	card := e.add(t, repoA, "# Original", task.Todo)
+	rec := e.do(t, "PATCH", taskURL(card.ID, repoA), `{"body":"# Newest","expectedRevision":1}`)
+	expectStatus(t, rec, 200)
+	updated := decode[map[string]any](t, rec)
+	if updated["revision"] != float64(2) {
+		t.Fatalf("updated revision = %v, want 2", updated["revision"])
+	}
+	rec = e.do(t, "PATCH", taskURL(card.ID, repoA), `{"body":"# Stale","expectedRevision":1}`)
+	expectStatus(t, rec, 409)
+	conflict := decode[errorJSON](t, rec)
+	if conflict.Error == "" || conflict.Current != "" {
+		t.Errorf("revision conflict = %+v, want explanation without a status conflict", conflict)
+	}
+	stored, err := e.store.Get(context.Background(), repoA, card.ID)
+	if err != nil || stored.Body != "# Newest" || stored.Revision != 2 {
+		t.Errorf("stale update changed card: %+v, err=%v", stored, err)
+	}
+	expectStatus(t, e.do(t, "PATCH", taskURL(card.ID, repoA), `{"body":"# Invalid","expectedRevision":0}`), 400)
+}
+
+func TestRevisionConflictMapsToConflictHTTPStatus(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeError(rec, &task.RevisionConflictError{ID: 1, Expected: 1, Current: 2})
+	expectStatus(t, rec, 409)
+	if got := decode[errorJSON](t, rec); got.Error == "" || got.Current != "" {
+		t.Errorf("revision conflict response = %+v", got)
+	}
+}

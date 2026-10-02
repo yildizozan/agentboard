@@ -414,6 +414,23 @@ main {
   font-size: 12px;
 }
 
+.editor-error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 12px 0;
+}
+
+.task-actions select {
+  max-width: 100%;
+}
+
 .markdown {
   overflow-wrap: anywhere;
 }

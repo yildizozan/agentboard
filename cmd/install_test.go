@@ -352,3 +352,28 @@ func TestWriteSkillRejectsDifferentSymlink(t *testing.T) {
 		t.Errorf("symlink target changed: %v", err)
 	}
 }
+
+func TestInstallProjectRejectsInlineServerTableWithoutWriting(t *testing.T) {
+	dir := setup(t)
+	t.Chdir(dir)
+	path := filepath.Join(dir, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before := []byte("# Keep this configuration intact.\nmcp_servers = { other = { command = \"other\" } }\n")
+	if err := os.WriteFile(path, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "install", "--scope", "project"); err == nil || !strings.Contains(err.Error(), "inline") {
+		t.Fatalf("install error = %v, want actionable inline-table error", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(before) {
+		t.Fatalf("existing configuration changed: %q, %v", got, err)
+	}
+	for _, name := range []string{".mcp.json", ".agents", ".claude"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s was written despite invalid generated config: %v", name, err)
+		}
+	}
+}

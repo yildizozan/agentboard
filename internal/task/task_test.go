@@ -89,12 +89,53 @@ func TestTitleOf(t *testing.T) {
 }
 
 func TestTaskString(t *testing.T) {
-	tk := Task{ID: 12, Status: Doing, Body: "# Fix login bug\n\n## Context"}
+	tk := Task{ID: 12, Status: Doing, Body: "# Fix login bug\n\n## Context", Revision: 7}
 	if got, want := tk.String(), "#12 [doing] Fix login bug"; got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
-	if got, want := tk.Detail(), "#12 [doing] Fix login bug\n\n# Fix login bug\n\n## Context"; got != want {
+	if got, want := tk.Detail(), "#12 [doing] Fix login bug\nRevision: 7\n\n# Fix login bug\n\n## Context"; got != want {
 		t.Errorf("Detail() = %q, want %q", got, want)
+	}
+}
+
+func TestPatchValidatesExpectedRevision(t *testing.T) {
+	for _, data := range []string{
+		`{"body":"# New", "expectedRevision":0}`,
+		`{"body":"# New", "expectedRevision":-1}`,
+	} {
+		var p Patch
+		if err := json.Unmarshal([]byte(data), &p); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Validate(); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Validate(%s) = %v, want invalid revision", data, err)
+		}
+	}
+	var p Patch
+	if err := json.Unmarshal([]byte(`{"body":"# New", "expectedRevision":7}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	validated, err := p.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(validated)
+	if err != nil || !strings.Contains(string(data), `"expectedRevision":7`) {
+		t.Fatalf("validated patch lost revision: %s, %v", data, err)
+	}
+}
+
+func TestTaskJSONAndDetailExposeRevision(t *testing.T) {
+	var tk Task
+	if err := json.Unmarshal([]byte(`{"id":12,"body":"# Title","status":"todo","revision":7}`), &tk); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(tk)
+	if err != nil || !strings.Contains(string(data), `"revision":7`) {
+		t.Fatalf("task JSON lost revision: %s, %v", data, err)
+	}
+	if !strings.Contains(tk.Detail(), "\nRevision: 7\n\n# Title") {
+		t.Errorf("Detail does not expose revision: %q", tk.Detail())
 	}
 }
 

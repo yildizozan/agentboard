@@ -64,6 +64,9 @@ the directory where you run it, independent of `--repo`. Codex loads project
 configuration only after you trust the project; Claude Code asks you to approve
 project MCP servers. Re-running project install keeps matching entries and
 reports a conflict rather than replacing a different `agentboard` entry.
+An inline TOML `mcp_servers = { ... }` table cannot be extended safely while
+preserving the file. Convert it to `[mcp_servers.<name>]` tables before installing;
+the installer reports this case without changing either client's configuration.
 Registration uses the absolute path of the installed `agentboard` binary, so
 move the binary only after re-registering it.
 
@@ -172,8 +175,8 @@ The CLI works on the board of the current directory, or of `--repo <dir>`.
 agentboard add <body|-> [-s status] [-k task|epic] [-p low|normal|high] [-e epic]
 agentboard ls [-s status] [-e epic]
 agentboard show <id>
-agentboard mv <id> <status> [--from status]
-agentboard edit <id> [<body|->] [-p priority] [-e epic]
+agentboard mv <id> <status> [--from status] [--expected-revision n]
+agentboard edit <id> [<body|->] [-p priority] [-e epic] [--expected-revision n]
 agentboard merge <target> <source>
 agentboard rm <id>
 agentboard serve
@@ -199,6 +202,24 @@ parent assigned before editing or moving. There is no automatic grouping or
 data deletion. Restart older board and MCP processes after upgrading so all
 writers enforce the same rule.
 
+Database upgrades now run automatically in a transaction when the store opens.
+The original v0.1.0 title/description schema and the later Markdown schema are
+supported; task IDs, repository keys, timestamps and existing content are kept.
+Take a backup before upgrading and restart all board/MCP processes so every
+writer uses the current schema and revision rules. Downgrading after a database
+upgrade is not supported.
+
+### Concurrent edits
+
+Every card has an integer revision. `agentboard show` and MCP `task_get` include
+`Revision: <n>` alongside the body. Pass CLI `--expected-revision <n>` or MCP
+`expectedRevision` when editing or moving a card to reject changes made since
+you read it. HTTP task responses include `revision`; PATCH accepts
+`expectedRevision` and returns `409` on a mismatch without changing the task.
+The revision check is optional for existing clients; the web editor always uses
+it and keeps your draft open on a conflict. Read the current card and reconcile
+the changes before retrying. The `from` status check remains available for claims.
+
 ## Web board
 
 ```bash
@@ -215,6 +236,11 @@ board it starts with epic creation. An epic's dialog lists its tasks. The page r
 so work done by agents shows up by itself. If an agent moved a card after the
 page last refreshed, dropping that card is refused and the board reloads
 instead of overwriting the agent's change.
+
+The card detail dialog also offers a status selector and merge controls, so these
+operations are available without dragging. While a save is pending, editor fields
+are locked and duplicate submissions are ignored. Delayed responses from a previous
+board or operation cannot replace a newer board or editor draft.
 
 The board has no authentication and only listens on loopback addresses.
 Requests with a non-loopback `Host` header are rejected, and writes must be JSON,
@@ -261,6 +287,8 @@ For UI work, run `agentboard board` and `npm --prefix web run dev` side by side;
 Vite proxies `/api` to the running board.
 
 Releases are built by [GoReleaser](https://goreleaser.com) when a `v*` tag is pushed.
+The release workflow first runs the same verification workflow as pull requests,
+including CLI/database/server smoke tests on macOS and Windows.
 
 ## License
 

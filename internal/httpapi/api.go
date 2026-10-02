@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"mime"
@@ -107,6 +108,8 @@ func isFile(fsys fs.FS, name string) bool {
 // which fails because no CORS headers are ever sent, so cross-site writes are blocked.
 func guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		w.Header().Set("X-Frame-Options", "DENY")
 		if !isLoopbackHost(r.Host) {
 			writeJSON(w, http.StatusForbidden, errorJSON{Error: "forbidden host"})
 			return
@@ -273,15 +276,24 @@ func decodeJSON(r *http.Request, v any) error {
 	if err := dec.Decode(v); err != nil {
 		return task.Invalidf("invalid JSON body: %v", err)
 	}
+	if err := dec.Decode(new(any)); err != io.EOF {
+		if err != nil {
+			return task.Invalidf("invalid JSON body: %v", err)
+		}
+		return task.Invalidf("invalid JSON body: expected one JSON value")
+	}
 	return nil
 }
 
 // writeError maps domain errors to HTTP status codes in one place.
 func writeError(w http.ResponseWriter, err error) {
 	var conflict *task.ConflictError
+	var revisionConflict *task.RevisionConflictError
 	switch {
 	case errors.As(err, &conflict):
 		writeJSON(w, http.StatusConflict, errorJSON{Error: err.Error(), Current: conflict.Current})
+	case errors.As(err, &revisionConflict):
+		writeJSON(w, http.StatusConflict, errorJSON{Error: err.Error()})
 	case errors.Is(err, task.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, errorJSON{Error: err.Error()})
 	case errors.Is(err, task.ErrInvalid):

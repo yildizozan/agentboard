@@ -181,5 +181,9 @@ func projectCodexConfig(path, binary string) ([]byte, bool, error) {
 		data = append(data, '\n')
 	}
 	data = append(data, []byte(fmt.Sprintf("\n[mcp_servers.agentboard]\ncommand = %s\nargs = [\"serve\"]\n", quotedBinary))...)
+	var generated map[string]any
+	if err := toml.Unmarshal(data, &generated); err != nil {
+		return nil, false, fmt.Errorf("cannot add agentboard to %s without changing existing settings: use [mcp_servers.<name>] tables instead of an inline mcp_servers table: %w", path, err)
+	}
 	return data, true, nil
 }
